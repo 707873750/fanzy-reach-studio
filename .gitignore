@@ -1,0 +1,14 @@
+node_modules/
+out/
+release/
+dist/
+*.log
+.env
+.DS_Store
+Thumbs.db
+
+.venv/
+.uv-cache/
+.python-runtime/
+__pycache__/
+browser-profiles/
