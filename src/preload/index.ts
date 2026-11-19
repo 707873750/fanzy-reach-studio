@@ -1,7 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { BrowserSettings, Draft, ImageAsset, ImportResult, Platform, SettingsView, RunLog, LogSnapshot } from "../shared/types";
+import type { PlatformDefaults, PlatformDefaultsMap } from "../shared/types";
+import type { BrowserSettings, CopyOptions, DraftPatch, Draft, ImageAsset, ImportResult, Platform, SettingsView, RunLog, LogSnapshot } from "../shared/types";
 
 const api = {
+  reportUiPerformance: (sample: Record<string, number | boolean>): Promise<void> => ipcRenderer.invoke("performance:ui", sample),
+  getPlatformDefaults: (): Promise<PlatformDefaultsMap> => ipcRenderer.invoke("settings:platforms"),
+  savePlatformDefaults: (platform: Platform, value: PlatformDefaults): Promise<PlatformDefaults> => ipcRenderer.invoke("settings:platform-save", platform, value),
   reportRendererError: (message: string, detail?: string): Promise<void> => ipcRenderer.invoke("logs:renderer-error", message, detail),
   getLogs: (): Promise<LogSnapshot> => ipcRenderer.invoke("logs:list"),
   openLogFolder: (): Promise<void> => ipcRenderer.invoke("logs:folder"),
@@ -29,13 +33,13 @@ const api = {
     ipcRenderer.invoke("images:list"),
   deleteImage: (id: string): Promise<void> =>
     ipcRenderer.invoke("images:delete", id),
-  createDrafts: (ids: string[], platforms: Platform[]): Promise<Draft[]> =>
-    ipcRenderer.invoke("drafts:create", ids, platforms),
+  createDrafts: (ids: string[], platforms: Platform[], copy?: CopyOptions): Promise<Draft[]> =>
+    ipcRenderer.invoke("drafts:create", ids, platforms, copy),
   listDrafts: (): Promise<Draft[]> =>
     ipcRenderer.invoke("drafts:list"),
   deleteDraft: (id: string): Promise<void> =>
     ipcRenderer.invoke("drafts:delete", id),
-  updateDraft: (id: string, patch: Partial<Pick<Draft, "title" | "caption" | "altText" | "hashtags" | "boardName" | "xScheduledAt">>): Promise<Draft> =>
+  updateDraft: (id: string, patch: DraftPatch): Promise<Draft> =>
     ipcRenderer.invoke("drafts:update", id, patch),
   generateCaption: (id: string): Promise<Draft> =>
     ipcRenderer.invoke("drafts:generate", id),

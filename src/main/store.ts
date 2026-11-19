@@ -1,7 +1,7 @@
 import { app } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { Draft, ImageAsset, Platform } from "../shared/types";
+import type { Draft, ImageAsset, Platform, PlatformDefaultsMap } from "../shared/types";
 
 export interface StoredImage extends ImageAsset {
   originalPath: string;
@@ -14,6 +14,7 @@ export interface StoreData {
   images: StoredImage[];
   drafts: StoredDraft[];
   settings: {
+    platformDefaults?: Partial<PlatformDefaultsMap>;
     deepSeekKeyEncrypted?: string;
     model?: string;
     showBrowser?: boolean;
@@ -58,7 +59,7 @@ export async function initStore() {
 }
 
 export function getStore(): StoreData {
-  if (!data) throw new Error("Local store has not been initialized");
+  if (!data) throw new Error("本地存储尚未初始化");
   return data;
 }
 
@@ -83,12 +84,13 @@ export function findDraft(id: string) {
 
 export function updateDraftRecord(id: string, patch: Partial<StoredDraft>) {
   const draft = findDraft(id);
-  if (!draft) throw new Error("Draft not found");
+  if (!draft) throw new Error("未找到草稿");
   Object.assign(draft, patch, { updatedAt: new Date().toISOString() });
   return draft;
 }
 
 export function platformBatchSize(platform: Platform) {
+  if (platform === "tiktok") return 35;
   if (platform === "instagram") return 10;
   if (platform === "x") return 4;
   return 1;

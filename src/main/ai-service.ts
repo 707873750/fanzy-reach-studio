@@ -2,12 +2,13 @@ import { safeStorage } from "electron";
 import sharp from "sharp";
 import { getStore, findDraft, findImage, persistStore, updateDraftRecord } from "./store";
 import type { Draft, Platform } from "../shared/types";
+import { canEditCopy } from "../shared/draft-copy";
 
 async function getApiKey() {
   const encrypted = getStore().settings.deepSeekKeyEncrypted;
-  if (!encrypted) throw new Error("Add your DeepSeek API key in Settings first.");
+  if (!encrypted) throw new Error("请先在设置中添加 DeepSeek API 密钥。");
   if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error("Windows secure credential storage is unavailable.");
+    throw new Error("Windows 安全凭据存储不可用。");
   }
   return safeStorage.decryptString(Buffer.from(encrypted, "base64"));
 }
@@ -19,6 +20,12 @@ function promptFor(platform: Platform, imageCount: number) {
 Create one Instagram carousel caption. Output JSON:
 {"title":"","caption":"","hashtags":["#tag1","#tag2"],"alt_text":"A concise accessible description of the image set."}
 Caption should be engaging and conversational. Use 3-8 relevant hashtags. Do not add a fake link or unsupported claims.`;
+  }
+  if (platform === "tiktok") {
+    return `${common}
+Create a TikTok photo carousel caption. Output JSON:
+{"title":"Short title under 90 characters","caption":"Natural description under 3000 characters","hashtags":["#tag1","#tag2"],"alt_text":""}
+Use 3-5 relevant hashtags. Do not invent music, trends or unsupported claims.`;
   }
   if (platform === "x") {
     return `${common}
@@ -34,7 +41,8 @@ Use descriptive keywords naturally. Do not keyword-stuff.`;
 
 export async function generateCaption(draftId: string): Promise<Draft> {
   const draft = findDraft(draftId);
-  if (!draft) throw new Error("Draft not found");
+  if (!draft) throw new Error("未找到草稿");
+  if (!canEditCopy(draft)) throw new Error("已提交的草稿不能生成文案，请先核对发布结果");
   const apiKey = await getApiKey();
 
   const imageParts: Array<{ type: "text" | "image_url"; text?: string; image_url?: { url: string; detail: "low" } }> = [
@@ -80,10 +88,10 @@ export async function generateCaption(draftId: string): Promise<Draft> {
       error?: { message?: string };
     };
     if (!response.ok) {
-      throw new Error(body.error?.message || `DeepSeek API error: ${response.status}`);
+      throw new Error(body.error?.message || `DeepSeek 接口错误： ${response.status}`);
     }
     const content = body.choices?.[0]?.message?.content;
-    if (!content) throw new Error("AI returned an empty response");
+    if (!content) throw new Error("AI 返回了空内容");
 
     const parsed = JSON.parse(content) as {
       title?: string;
@@ -95,6 +103,8 @@ export async function generateCaption(draftId: string): Promise<Draft> {
     const updated = updateDraftRecord(draftId, {
       title: parsed.title || "",
       caption: parsed.caption || "",
+      captionMode: "independent",
+      independentCaption: parsed.caption || "",
       hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : [],
       altText: parsed.alt_text || "",
       status: "ready"
@@ -109,10 +119,10 @@ export async function generateCaption(draftId: string): Promise<Draft> {
 export async function saveDeepSeekKey(apiKey: string) {
   const key = apiKey.trim();
   if (!key.startsWith("sk-") || key.length < 20) {
-    throw new Error("Please enter a valid DeepSeek API key.");
+    throw new Error("请输入有效的 DeepSeek API 密钥。");
   }
   if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error("Windows secure credential storage is unavailable.");
+    throw new Error("Windows 安全凭据存储不可用。");
   }
   const encrypted = safeStorage.encryptString(key);
   getStore().settings.deepSeekKeyEncrypted = encrypted.toString("base64");

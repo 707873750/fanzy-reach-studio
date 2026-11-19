@@ -174,3 +174,48 @@ Use the app's own UI to manage data. Do not manually edit `reach-data.json` whil
 4. Add Windows toast notification and tray mode.
 5. Add an optional official API integration only after reviewing each platform's current terms, access requirements and costs.
 
+# 统一文案与独立文案
+
+## Pinterest 发布结果
+
+发布按钮只点击一次。程序监听本次提交后的简繁中文及英文成功提示，并保留短暂出现的提示证据；另被动识别浏览器 `/resource/PinResource/create/` 的成功响应与有效 Pin ID，识别到时保存 Pin 链接。程序不会主动调用或重放创建接口。
+
+45 秒内未取得明确证据时显示“已提交，结果待确认”，日志为警告，并保存待确认截图。推广弹窗或编辑器清空本身不会被认定为成功。平台改变响应格式时仍可能需要手动核对：在 Pinterest 确认帖子存在后，点击“已确认发布成功”；不要直接重发。
+
+## 卡顿诊断
+
+运行日志搜索 `performance.` 可查看以下记录（均不采集鼠标位置、按键内容或文案）：
+
+- `performance.ui`：每 5 秒汇总界面 rAF 回调间隔最大值/P95、100ms 心跳延迟峰值、长任务数量/最大时长、输入排队延迟。`visible` 与 `visibilityChanged` 标识窗口可见性，后台或可见性切换样本不能直接判定为卡顿。能力标志区分不支持与真实零值。rAF 间隔不是显卡完成绘制的耗时。
+- `performance.desktop`：主进程事件循环延迟最大值/P95及 Electron 子进程 CPU、工作集内存。发布期间每 5 秒记录；空闲时每 30 秒或检测到大于 150ms 阻塞时记录。GPU 进程的 CPU 占用不是 GPU 硬件利用率。
+- `performance.gpu_info` / `performance.gpu_exit`：启动时的 GPU 驱动与加速状态、GPU 进程退出；`performance.unresponsive` / `performance.responsive` 记录窗口失去/恢复响应。
+- `performance.sample`：发布页面与整机采样，新增 `gpuBusiestEnginePercent`（所有进程按同一物理引擎归并后的最忙引擎占用，不是各引擎相加）、`gpuCounterStatus` 与 `gpuSampleMs`。使用 [Windows PDH 计数器接口](https://learn.microsoft.com/en-us/windows/win32/api/pdh/nf-pdh-pdhgetformattedcounterarrayw)，无权限或驱动不支持时标注不可用，不返回虚假的零值。它是采样区间平均值，不能排除更短的 GPU 峰值。
+
+判断时对齐同一时段的这些记录：界面长任务/输入延迟高时先看界面；主进程延迟高时看主进程；GPU 引擎占用高或 GPU 退出、帧间隔异常而 JS 延迟低时，再检查渲染与驱动。指标只提供线索，不凭单条高值自动关闭硬件加速。
+
+日志视图每页 100 条、每 250ms 合并更新，筛选和复制覆盖最近 1000 条。离线性能对照可运行 `python/benchmark_ui.py`，真实 Electron 监控验证可运行 `electron tests/performance-desktop.cjs`，测试不发布内容。真实发布仍需重启新版程序后采样确认。
+
+## 各平台默认配置
+
+「设置与账号 → 各平台独立配置」支持分别保存 Instagram 的分组图片数量与标签、X 的分组图片数量与标签及定时偏好、Pinterest 的默认图板与标题及标签。配置写入本机数据文件，重启后仍保留，旧版本没有配置时沿用原来的默认值。
+
+配置仅在创建新草稿时复制进去，不覆盖已有草稿；在单条草稿中修改不会反向改变默认配置。X 保存的是相对创建时间的延后分钟数（10 至 10080 分钟），0 表示提交时立即发布，同批次 X 草稿使用同一个定时时间。创建后仍需手动提交，提交时须距排程至少 5 分钟。AI 生成会重新生成该草稿的标题和标签。
+
+在素材库选好图片和平台后，填写统一文案。每个平台都可以选择使用统一文案或独立文案，两种方式可混用；切换选项会保留输入的独立版本，也可将统一文案复制到独立编辑框后修改。
+
+同次创建的草稿关联为一个文案批次。发布队列中保存统一正文时，会同步本批次使用统一文案的可编辑草稿；独立文案仅修改当前草稿。切换模式会先保存当前编辑内容。标题、话题标签、图片替代说明、图板与 X 排程仍分别设置。AI 生成会切换为当前平台独立文案。
+
+已有草稿维持独立编辑。已发布、已排程或结果待确认的任务不会被统一文案覆盖。界面使用简体中文；平台名称、日志步骤标识与底层错误堆栈保留原文，方便排查。
+
+
+## TikTok 图片轮播（网页端适配）
+
+- 平台选择、独立 Chrome 登录、共享/独立文案、AI 文案、平台配置及日志均支持 TikTok。
+- 每条草稿最多 35 张图片，按选择顺序导出 JPEG，保持比例缩放至 1080 × 1920 以内，不放大小图；仍使用通用限制：单图 12 MB、单任务 24 MB。
+- 标题最多 90 个 UTF-16 单元，描述加话题最多 4000 个。批量提交前请保存草稿。
+- 自动发布依赖账号的 TikTok Studio 网页端提供图片上传入口。适配器检测明确支持图片的上传控件、全部本地图片预览和可识别的标题/描述字段；不支持的页面会停止并显示原因。此时可使用准备素材/复制文案功能，在 TikTok 手机端完成轮播并手动确认发布。
+- 最终提交沿用持久化检查点；只有明确的发布成功提示才记为成功，“上传成功”不视为已发布。结果不明需要人工核对。
+- 已用拦截网络的本地页面测试验证流程，尚未验证真实 TikTok 账号页面。页面布局、预览地址格式或确认弹窗变化可能需要继续适配。
+- 本次没有接入 TikTok Content Posting API；该 API 的图片发布要求 OAuth 授权和经验证的公网图片 URL：https://developers.tiktok.com/docs/en/content-posting-api-reference-photo-post 。
+
+验证：`.venv\Scripts\python.exe -m unittest discover -s python -p test_tiktok.py`

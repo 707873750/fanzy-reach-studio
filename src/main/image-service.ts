@@ -16,11 +16,11 @@ async function sha256(filePath: string) {
 
 async function importOne(sourcePath: string) {
   const stat = await fs.stat(sourcePath);
-  if (!stat.isFile()) throw new Error("Not a file");
-  if (stat.size > MAX_FILE_BYTES) throw new Error("Image exceeds 50 MB limit");
+  if (!stat.isFile()) throw new Error("所选路径不是文件");
+  if (stat.size > MAX_FILE_BYTES) throw new Error("图片超过 50 MB 限制");
 
   const ext = path.extname(sourcePath).toLowerCase();
-  if (!ALLOWED.has(ext)) throw new Error("Unsupported image format");
+  if (!ALLOWED.has(ext)) throw new Error("不支持此图片格式");
 
   const hash = await sha256(sourcePath);
   const existing = getStore().images.find((image) => image.sha256 === hash);
@@ -28,7 +28,7 @@ async function importOne(sourcePath: string) {
 
   const metadata = await sharp(sourcePath, { animated: false }).metadata();
   if (!metadata.width || !metadata.height || !metadata.format) {
-    throw new Error("Unable to read image metadata");
+    throw new Error("无法读取图片信息");
   }
 
   const id = crypto.randomUUID();
@@ -98,7 +98,7 @@ export async function deleteImage(imageId: string) {
   const image = store.images.find((item) => item.id === imageId);
   if (!image) return;
   if (store.drafts.some((draft) => draft.imageIds.includes(imageId) && draft.status !== "published")) {
-    throw new Error("This image is used by an active draft. Delete or finish the draft first.");
+    throw new Error("图片正被草稿使用，请先删除或完成相关草稿。");
   }
   store.images = store.images.filter((item) => item.id !== imageId);
   await Promise.all([

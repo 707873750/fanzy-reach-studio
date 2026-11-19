@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
 import path from "node:path";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
@@ -6,10 +6,13 @@ import { initStore, getStore, persistStore, getAppPaths, findDraft } from "./sto
 import { importFiles, listImages, deleteImage } from "./image-service";
 import { createDrafts, listDrafts, deleteDraft, updateDraft, prepareDraft, markPublished, scheduleDraft } from "./draft-service";
 import { generateCaption, saveDeepSeekKey, clearDeepSeekKey, getSettings } from "./ai-service";
-import type { Platform } from "../shared/types";
+import type { CopyOptions, Platform } from "../shared/types";
 import { assertNotPublishing, getBrowserSettings, saveBrowserSettings, closePlatformBrowser, openPlatformBrowser, publishDrafts, resolvePublish, recoverPublishing, stopPublisher } from "./browser-publisher";
 
 import { initLogs, log, getLogs, flushLogs, errorDetail } from "./run-logger";
+import { getPlatformDefaults, savePlatformDefaults } from "./platform-settings";
+import { startPerformanceMonitor } from "./performance-monitor";
+let stopPerformanceMonitor: (()=>void) | undefined;
 
 const primaryInstance = app.requestSingleInstanceLock();
 if (!primaryInstance) app.quit();
@@ -65,9 +68,9 @@ function registerIpc() {
   handle("browser:resolve", (_event, id: string, published: boolean) => resolvePublish(id, published));
   handle("images:import-files", async () => {
     const result = await dialog.showOpenDialog({
-      title: "Select images",
+      title: "选择图片",
       properties: ["openFile", "multiSelections"],
-      filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "webp", "gif"] }]
+      filters: [{ name: "图片", extensions: ["jpg", "jpeg", "png", "webp", "gif"] }]
     });
     if (result.canceled) return { imported: [], duplicates: [], errors: [] };
     return importFiles(result.filePaths);
@@ -75,7 +78,7 @@ function registerIpc() {
 
   handle("images:import-folder", async () => {
     const result = await dialog.showOpenDialog({
-      title: "Select image folder",
+      title: "选择图片文件夹",
       properties: ["openDirectory"]
     });
     if (result.canceled || !result.filePaths[0]) {
@@ -88,16 +91,21 @@ function registerIpc() {
   handle("images:list", () => listImages());
   handle("images:delete", (_event, imageId: string) => deleteImage(imageId));
 
-  handle("drafts:create", (_event, imageIds: string[], platforms: Platform[]) => {
-    const allowed = ["instagram", "x", "pinterest"];
+  handle("drafts:create", (_event, imageIds: string[], platforms: Platform[], copy?: CopyOptions) => {
+    const allowed = ["instagram", "x", "pinterest", "tiktok"];
     if (!Array.isArray(imageIds) || !Array.isArray(platforms) || platforms.some((p) => !allowed.includes(p))) {
-      throw new Error("Invalid draft request");
+      throw new Error("无效的草稿请求");
     }
-    return createDrafts(imageIds, platforms);
+    return createDrafts(imageIds, platforms, copy);
   });
   handle("drafts:list", () => listDrafts());
   handle("drafts:delete", (_event, id: string) => { assertNotPublishing(id); return deleteDraft(id); });
-  handle("drafts:update", (_event, id: string, patch) => { assertNotPublishing(id); return updateDraft(id, patch); });
+  handle("drafts:update", (_event, id: string, patch) => {
+    assertNotPublishing(id);
+    const group = findDraft(id)?.copyGroupId;
+    if (group) getStore().drafts.filter(d => d.copyGroupId === group).forEach(d => assertNotPublishing(d.id));
+    return updateDraft(id, patch);
+  });
   handle("drafts:generate", (_event, id: string) => { assertNotPublishing(id); return generateCaption(id); });
   handle("drafts:prepare", (_event, id: string) => { assertNotPublishing(id); return prepareDraft(id); });
 
@@ -115,7 +123,7 @@ function registerIpc() {
     if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return;
     if (!fsSync.existsSync(preparedFolder)) return;
 
-    const maxFiles = draft.platform === "instagram" ? 10 : draft.platform === "x" ? 4 : 1;
+    const maxFiles = draft.platform === "tiktok" ? 35 : draft.platform === "instagram" ? 10 : draft.platform === "x" ? 4 : 1;
     const files = fsSync.readdirSync(preparedFolder, { withFileTypes: true })
       .filter((entry) => entry.isFile() && /\.(jpe?g|png|webp)$/i.test(entry.name))
       .slice(0, maxFiles)
@@ -130,6 +138,8 @@ function registerIpc() {
   handle("drafts:schedule", (_event, id: string, date: string) => { assertNotPublishing(id); return scheduleDraft(id, date); });
 
   handle("settings:get", () => getSettings());
+  handle("settings:platforms", () => getPlatformDefaults());
+  handle("settings:platform-save", (_event, platform, value) => savePlatformDefaults(platform, value));
   handle("settings:save-key", (_event, key: string) => saveDeepSeekKey(key));
   handle("settings:clear-key", () => clearDeepSeekKey());
 
@@ -141,10 +151,12 @@ function registerIpc() {
       "x.com",
       "www.pinterest.com",
       "pinterest.com",
+      "www.tiktok.com",
+      "tiktok.com",
       "platform.deepseek.com"
     ]);
     if (parsed.protocol !== "https:" || !allowedHosts.has(parsed.hostname)) {
-      throw new Error("This external destination is not allowed.");
+      throw new Error("不支持打开此外部地址。");
     }
     await shell.openExternal(url);
   });
@@ -168,7 +180,7 @@ function checkScheduledDrafts() {
     if (Notification.isSupported()) {
       const notification = new Notification({
         title: "Fanzy Reach Studio",
-        body: `Your ${draft.platform} draft is ready for manual publishing.`
+        body: `${draft.platform} 草稿已到提醒时间，请手动提交。`
       });
       notification.on("click", () => mainWindow?.show());
       notification.show();
@@ -179,13 +191,19 @@ function checkScheduledDrafts() {
 }
 
 function createWindow() {
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    {label:"文件", submenu:[{label:"退出", role:"quit"}]},
+    {label:"编辑", submenu:[{label:"撤销",role:"undo"},{label:"重做",role:"redo"},{type:"separator"},{label:"剪切",role:"cut"},{label:"复制",role:"copy"},{label:"粘贴",role:"paste"},{label:"全选",role:"selectAll"}]},
+    {label:"视图", submenu:[{label:"重新加载",role:"reload"},{label:"开发者工具",role:"toggleDevTools"},{type:"separator"},{label:"实际大小",role:"resetZoom"},{label:"放大",role:"zoomIn"},{label:"缩小",role:"zoomOut"},{label:"全屏",role:"togglefullscreen"}]},
+    {label:"窗口", submenu:[{label:"最小化",role:"minimize"},{label:"关闭",role:"close"}]}
+  ]));
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
     minWidth: 1080,
     minHeight: 700,
     backgroundColor: "#101116",
-    title: "Fanzy Reach Studio",
+    title: "Fanzy Reach 发布工作室",
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -202,6 +220,8 @@ function createWindow() {
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
     void log({ source: "app", level: "error", step: "renderer.exited", message: `界面进程退出：${details.reason}，退出码 ${details.exitCode}` });
   });
+  mainWindow.on("unresponsive",()=>{void log({source:"app",level:"warn",step:"performance.unresponsive",message:"程序窗口无响应"});});
+  mainWindow.on("responsive",()=>{void log({source:"app",level:"info",step:"performance.responsive",message:"程序窗口恢复响应"});});
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -220,6 +240,7 @@ app.whenReady().then(async () => {
   await initStore();
   await recoverPublishing();
   registerIpc();
+  stopPerformanceMonitor = startPerformanceMonitor();
   createWindow();
   checkScheduledDrafts();
   reminderTimer = setInterval(checkScheduledDrafts, 30_000);
@@ -234,6 +255,7 @@ app.on("before-quit", event => {
   if (closing) return;
   event.preventDefault();
   closing = true;
+  stopPerformanceMonitor?.();
   if (reminderTimer) clearInterval(reminderTimer);
   void stopPublisher().then(() => log({ source: "app", level: "info", step: "app.stop", message: "程序退出，正在保存日志" })).then(flushLogs).finally(() => app.quit());
 });

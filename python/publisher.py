@@ -13,6 +13,7 @@ from adapters import URLS, validate
 import session_store
 from native_login import NativeChrome
 from performance_stats import system_sample
+from pinterest_confirmation import PinterestConfirmation
 
 ADAPTER_PATH = Path(__file__).with_name('page_adapter.js')
 CHANNELS = ('msedge', 'chrome', 'chromium')
@@ -20,6 +21,7 @@ LOGIN_URLS = {
     'x': 'https://x.com/i/flow/login',
     'instagram': 'https://www.instagram.com/',
     'pinterest': 'https://www.pinterest.com/',
+    'tiktok': 'https://www.tiktok.com/login',
 }
 
 
@@ -169,23 +171,42 @@ class Publisher:
             self.log('instagram.create.confirm', '等待上传弹窗确认；至少 5 秒内不重复点击', job)
         raise ValueError(f'Instagram 创建入口点击 {attempts} 次后仍未打开上传弹窗，已停止；未上传或发布。请查看失败截图，或打开可见浏览器检查页面加载/遮挡情况')
 
+    async def capture_result(self, page, request, job, pending=False):
+        if not page or page.is_closed():
+            return
+        try:
+            folder = Path(request['artifactsRoot']).resolve()
+            folder.mkdir(parents=True, exist_ok=True)
+            screenshot = folder / (job['jobId']+'.png')
+            await page.screenshot(path=str(screenshot), timeout=5000)
+            self.log('confirmation.screenshot' if pending else 'failure.screenshot',
+                     ('待确认截图已保存：' if pending else '失败截图已保存：')+str(screenshot), job, 'warn')
+            for old in sorted(folder.glob('*.png'), key=lambda f: f.stat().st_mtime, reverse=True)[50:]:
+                old.unlink()
+        except Exception as error:
+            self.log('confirmation.screenshot_failed' if pending else 'failure.screenshot_failed', '无法保存诊断截图', job, 'warn', str(error))
+
     async def publish(self, request, checkpoint):
         validate(request)
         job = {**request, 'jobId': uuid.uuid4().hex, 'fileCount': len(request['files'])}
         job.setdefault('id', job['jobId'])
         job.setdefault('hashtags', [])
-        context = page = monitor = None
+        context = page = monitor = confirmation = None
         checkpoint_requested = False
         self.log('job.start', '开始 Playwright 发布任务', job)
         try:
             async def execute():
-                nonlocal context, page, monitor, checkpoint_requested
+                nonlocal context, page, monitor, checkpoint_requested, confirmation
                 context = await self.launch(job, visible=job.get('showBrowser') is True)
                 page = context.pages[0] if context.pages else await context.new_page()
+                if job['platform'] == 'pinterest':
+                    confirmation = PinterestConfirmation(page)
                 monitor = asyncio.create_task(self.monitor_page(page, job))
                 page.on('pageerror', lambda error: self.log('page.error', '平台页面脚本异常', job, 'error', str(error)))
                 page.on('requestfailed', lambda req: self.log('network.failed', '网络请求失败：'+urlsplit(req.url).netloc, job, 'warn', req.failure))
                 async def trace(source, entry):
+                    if confirmation and entry.get('step') == 'submit.click':
+                        confirmation.armed = True
                     self.log(str(entry.get('step', 'page.event')), str(entry.get('message', '')), job,
                              entry.get('level', 'info'), entry.get('detail'), source='page')
                 await page.expose_binding('fanzyTrace', trace)
@@ -211,25 +232,26 @@ class Publisher:
                 if not await checkpoint():
                     raise ValueError('未获得持久化提交许可，已停止发布')
                 self.log('submit.checkpoint_saved', '提交检查点已保存', job)
-                await phase('submit')
+                result = await phase('submit')
+                if confirmation and confirmation.url:
+                    return {'state':'succeeded','message':'Pinterest 已确认创建 Pin。','url':confirmation.url}
+                if result and result.get('state') == 'uncertain':
+                    self.log('task.uncertain', '已提交，结果待确认', job, 'warn')
+                    await self.capture_result(page, request, job, pending=True)
+                    return {'state':'uncertain','message':'已提交，结果待确认'}
                 return {'state': 'succeeded', 'message': ('X 已确认定时排程：'+job['xScheduledAt']+'。修改或取消请前往 X。') if job.get('xScheduledAt') else '平台已显示发布成功确认。'}
             return await asyncio.wait_for(execute(), timeout=180)
         except Exception as error:
+            if confirmation and confirmation.url:
+                self.log('submit.success','Pinterest 已返回本次创建的 Pin 链接',job)
+                return {'state':'succeeded','message':'Pinterest 已确认创建 Pin。','url':confirmation.url}
             message = str(error) or '发布任务超时，请检查网络、登录或平台页面'
-            self.log('task.failed', message, job, 'error', traceback.format_exc())
-            if page and not page.is_closed():
-                try:
-                    folder = Path(request['artifactsRoot']).resolve()
-                    folder.mkdir(parents=True, exist_ok=True)
-                    screenshot = folder / (job['jobId']+'.png')
-                    await page.screenshot(path=str(screenshot), timeout=5000)
-                    self.log('failure.screenshot', '失败截图已保存：'+str(screenshot), job, 'warn')
-                    for old in sorted(folder.glob('*.png'), key=lambda f: f.stat().st_mtime, reverse=True)[50:]:
-                        old.unlink()
-                except Exception as screenshot_error:
-                    self.log('failure.screenshot_failed', '无法保存失败截图', job, 'warn', str(screenshot_error))
-            return {'state': 'uncertain' if checkpoint_requested else 'needs_attention', 'message': message}
+            self.log('task.uncertain' if checkpoint_requested else 'task.failed', '已提交，结果待确认' if checkpoint_requested else message, job, 'warn' if checkpoint_requested else 'error', traceback.format_exc())
+            await self.capture_result(page, request, job, pending=checkpoint_requested)
+            return {'state': 'uncertain' if checkpoint_requested else 'needs_attention', 'message': '已提交，结果待确认' if checkpoint_requested else message}
         finally:
+            if confirmation:
+                await confirmation.close()
             if monitor:
                 monitor.cancel()
                 await asyncio.gather(monitor, return_exceptions=True)
@@ -247,7 +269,15 @@ class Publisher:
     async def monitor_page(self, page, job):
         """Low-rate diagnostic counters, never page content or form values."""
         session = None
+        from gpu_stats import GpuSampler
+        gpu = None
         try:
+            initializing = asyncio.create_task(asyncio.to_thread(GpuSampler))
+            try:
+                gpu = await asyncio.shield(initializing)
+            except asyncio.CancelledError:
+                gpu = await initializing
+                raise
             session = await page.context.new_cdp_session(page)
             await session.send('Performance.enable')
             previous = None
@@ -260,15 +290,24 @@ class Publisher:
                 previous = (now, metrics.get('TaskDuration', 0))
                 heap = metrics.get('JSHeapUsedSize', 0)/1048576
                 system, system_previous = system_sample(system_previous)
-                detail = json.dumps({**system, 'pageMainThreadBusyPercent': None if cpu is None else round(cpu,1),
+                gpu_started = asyncio.get_running_loop().time()
+                try:
+                    gpu_metrics = await asyncio.to_thread(gpu.sample)
+                except Exception as error:
+                    gpu_metrics = {'gpuCounterStatus': 'unavailable:' + type(error).__name__}
+                gpu_metrics['gpuSampleMs'] = round((asyncio.get_running_loop().time()-gpu_started)*1000, 1)
+                detail = json.dumps({**system, **gpu_metrics, 'pageMainThreadBusyPercent': None if cpu is None else round(cpu,1),
                                      'jsHeapMB':round(heap,1), 'domNodes':metrics.get('Nodes',0),
                                      'openPages':len(page.context.pages)})
-                self.log('performance.sample', '性能采样：整机 CPU / 可用内存及发布页面主线程 / JS 内存', job,
-                         'warn' if cpu is not None and cpu>80 else 'info', detail)
+                self.log('performance.sample', '性能采样：整机 CPU / 内存 / GPU 最忙引擎及发布页面主线程', job,
+                         'warn' if (cpu is not None and cpu>80) or gpu_metrics.get('gpuBusiestEnginePercent',0)>90 else 'info', detail)
                 await asyncio.sleep(5)
         except Exception as error:
             self.log('performance.unavailable', '无法读取页面性能指标，不影响发布', job, 'warn', type(error).__name__)
         finally:
+            if gpu:
+                # close() uses the same lock as sample() if cancellation leaves it running.
+                await asyncio.to_thread(gpu.close)
             if session:
                 try:
                     await session.detach()

@@ -146,6 +146,9 @@ button { cursor: pointer; }
 .draft-select-row > input { accent-color: #a18cff; }
 
 .field select { border: 1px solid #373844; border-radius: 7px; padding: 10px 11px; background: #13141b; color: #eee; font-size: 11px; }
+.copy-options { margin-top:20px; padding-top:12px; border-top:1px solid #373844; }
+.copy-options .text-button { align-self:flex-start; }
+.settings-actions,.detail-actions,.heading-actions { flex-wrap:wrap; }
 
 .log-filters { display:flex; gap:12px; flex-wrap:wrap; }
 .log-search { flex:1; min-width:240px; }

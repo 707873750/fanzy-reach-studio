@@ -2,7 +2,7 @@
 import tempfile
 import asyncio
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from playwright.async_api import async_playwright
@@ -69,6 +69,7 @@ class PlaywrightPublishingTests(unittest.IsolatedAsyncioTestCase):
         samples = [e for e in self.events if e['step']=='performance.sample']
         self.assertGreaterEqual(len(samples), 3)
         self.assertTrue(all('jsHeapMB' in e['detail'] for e in samples))
+        self.assertTrue(all('gpuCounterStatus' in e['detail'] for e in samples))
         self.assertFalse(any('PRIVATE fixture caption' in e['message'] for e in self.events))
 
     async def test_x_navigation_denied_never_submits(self):
@@ -84,6 +85,13 @@ class PlaywrightPublishingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('尚未上传或发送', result['message'])
         self.assertTrue(any(e['step']=='page.http' and '403' in e['message'] for e in self.events))
         self.assertFalse(any(e['step'] in ('asset.load','submit.click') for e in self.events))
+
+    async def test_gpu_sampling_failure_does_not_fail_publish(self):
+        with patch('gpu_stats.GpuSampler.sample',side_effect=RuntimeError('fixture counter failure')):
+            result=await self.runner.publish(self.job,self.checkpoint)
+        self.assertEqual(result['state'],'succeeded',result)
+        samples=[e for e in self.events if e['step']=='performance.sample']
+        self.assertTrue(any('unavailable:RuntimeError' in e['detail'] for e in samples))
 
     async def test_x_preview_without_attachments_wrapper(self):
         self.fixture['x'] = FIXTURE.replace('<div data-testid="attachments" id="attachments">', '<div id="attachments">')
@@ -158,6 +166,37 @@ class PlaywrightPublishingTests(unittest.IsolatedAsyncioTestCase):
                 return await self.checkpoint()
             result=await self.runner.publish({**self.job,'platform':'pinterest'},checkpoint)
             self.assertEqual(result['state'],'succeeded',result)
+
+    async def test_pinterest_transient_chinese_confirmation(self):
+        original="document.querySelector('#success').textContent='Your Pin has been published.'"
+        self.fixture['pinterest']=PINTEREST.replace(original,"setTimeout(()=>{document.querySelector('#success').textContent='你的 Pin 图已发布！';setTimeout(()=>{document.querySelector('#success').textContent='';document.body.insertAdjacentHTML('beforeend','<div role=dialog>找到喜欢的，立刻收藏起来。立即安装</div>');},40);},20)")
+        result=await self.runner.publish({**self.job,'platform':'pinterest'},self.checkpoint)
+        self.assertEqual(result['state'],'succeeded',result)
+        self.assertEqual(sum(e['step']=='submit.click' for e in self.events),1)
+
+    async def test_pinterest_create_response_confirms_under_promo(self):
+        async def checkpoint():
+            await self.checkpoint()
+            await self.context.route('**/resource/PinResource/create/',lambda route:route.fulfill(json={'resource_response':{'status':'success','data':{'id':'123456789012345'}}}))
+            await self.context.pages[0].evaluate("() => {document.querySelector('button:last-of-type').onclick=()=>{window.clicks=(window.clicks||0)+1;fetch('/resource/PinResource/create/',{method:'POST'});document.body.insertAdjacentHTML('beforeend','<div role=dialog>安装扩展程序</div>');};}")
+            return True
+        result=await self.runner.publish({**self.job,'platform':'pinterest'},checkpoint)
+        self.assertEqual(result['state'],'succeeded',result)
+        self.assertEqual(result['url'],'https://www.pinterest.com/pin/123456789012345/')
+        self.assertFalse(any(e['step']=='task.failed' for e in self.events))
+
+    async def test_pinterest_promo_without_evidence_stays_pending(self):
+        from publisher import ADAPTER_PATH
+        adapter=Path(self.temp.name)/'short-confirmation.js'
+        adapter.write_text(ADAPTER_PATH.read_text(encoding='utf-8').replace('Date.now()+45000','Date.now()+800'),encoding='utf-8')
+        original="document.querySelector('#success').textContent='Your Pin has been published.'"
+        self.fixture['pinterest']=PINTEREST.replace(original,"document.querySelector('#success').textContent='';document.body.insertAdjacentHTML('beforeend','<div role=dialog>找到喜欢的，立刻收藏起来。立即安装</div>')")
+        with patch('publisher.ADAPTER_PATH',adapter):
+            result=await self.runner.publish({**self.job,'platform':'pinterest'},self.checkpoint)
+        self.assertEqual(result,{'state':'uncertain','message':'已提交，结果待确认'})
+        self.assertEqual(sum(e['step']=='submit.click' for e in self.events),1)
+        self.assertFalse(any(e['step'] in ('task.failed','control.failed','submit.success') for e in self.events))
+        self.assertTrue(any(e['step']=='confirmation.screenshot' for e in self.events))
 
     async def test_login_profile_reuse_and_lock(self):
         profile = self.runner.profile(self.job)

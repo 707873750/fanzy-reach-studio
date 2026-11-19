@@ -1,4 +1,17 @@
-export type Platform = "instagram" | "x" | "pinterest";
+export type Platform = "instagram" | "x" | "pinterest" | "tiktok";
+export interface PlatformDefaults {
+  imagesPerDraft: number;
+  hashtags: string[];
+  boardName: string;
+  title: string;
+  scheduleDelayMinutes: number;
+}
+export type PlatformDefaultsMap = Record<Platform, PlatformDefaults>;
+export interface CopyOptions {
+  sharedCaption: string;
+  platforms: Partial<Record<Platform, { mode: "shared" | "independent"; caption: string }>>;
+}
+export type DraftPatch = Partial<Pick<Draft, "title" | "caption" | "altText" | "hashtags" | "boardName" | "xScheduledAt" | "captionMode">>;
 export interface BrowserSettings { showBrowser: boolean; channel: "msedge" | "chrome" | "chromium"; }
 export interface RunLog {
   id: string;
@@ -34,6 +47,10 @@ export interface Draft {
   imageIds: string[];
   title: string;
   caption: string;
+  copyGroupId?: string;
+  captionMode?: "shared" | "independent";
+  sharedCaption?: string;
+  independentCaption?: string;
   hashtags: string[];
   altText: string;
   status: DraftStatus;
@@ -63,6 +80,9 @@ export interface CreateDraftResult {
 }
 
 export interface ReachApi {
+  reportUiPerformance: (sample: Record<string, number | boolean>) => Promise<void>;
+  getPlatformDefaults: () => Promise<PlatformDefaultsMap>;
+  savePlatformDefaults: (platform: Platform, value: PlatformDefaults) => Promise<PlatformDefaults>;
   reportRendererError: (message: string, detail?: string) => Promise<void>;
   getLogs: () => Promise<LogSnapshot>;
   openLogFolder: () => Promise<void>;
@@ -79,10 +99,10 @@ export interface ReachApi {
   importFolder: () => Promise<ImportResult>;
   listImages: () => Promise<ImageAsset[]>;
   deleteImage: (imageId: string) => Promise<void>;
-  createDrafts: (imageIds: string[], platforms: Platform[]) => Promise<Draft[]>;
+  createDrafts: (imageIds: string[], platforms: Platform[], copy?: CopyOptions) => Promise<Draft[]>;
   listDrafts: () => Promise<Draft[]>;
   deleteDraft: (draftId: string) => Promise<void>;
-  updateDraft: (draftId: string, patch: Partial<Pick<Draft, "title" | "caption" | "altText" | "hashtags" | "boardName" | "xScheduledAt">>) => Promise<Draft>;
+  updateDraft: (draftId: string, patch: DraftPatch) => Promise<Draft>;
   generateCaption: (draftId: string) => Promise<Draft>;
   getSettings: () => Promise<SettingsView>;
   saveDeepSeekKey: (apiKey: string) => Promise<SettingsView>;

@@ -9,6 +9,7 @@ import { prepareDraft } from "./draft-service";
 import type { BrowserSettings, Draft, Platform } from "../shared/types";
 
 import { log, errorDetail } from "./run-logger";
+import { setPerformancePublishing } from "./performance-monitor";
 
 type Result = { state: "opened" | "succeeded" | "needs_attention" | "uncertain"; message?: string; url?: string };
 let worker: ChildProcessWithoutNullStreams | undefined;
@@ -20,7 +21,7 @@ export function getBrowserSettings(): BrowserSettings {
   return { showBrowser: getStore().settings.showBrowser === true, channel: "chrome" };
 }
 export async function saveBrowserSettings(value: BrowserSettings) {
-  if (busy) throw new Error("Wait for the current browser operation to finish");
+  if (busy) throw new Error("请等待当前浏览器操作完成");
   if (typeof value.showBrowser !== "boolean" || value.channel !== "chrome") throw new Error("登录和发布统一使用 Google Chrome");
   getStore().settings.showBrowser = value.showBrowser;
   getStore().settings.browserChannel = value.channel;
@@ -32,7 +33,7 @@ function browserOptions() {
 }
 
 export function assertNotPublishing(id: string) {
-  if (locked.has(id)) throw new Error("This draft is in the publishing queue. Wait for the batch to finish.");
+  if (locked.has(id)) throw new Error("草稿正在发布队列中，请等待当前批次完成。");
 }
 
 function notify(draft: Draft) {
@@ -59,7 +60,7 @@ function getWorker() {
   const fail = () => {
     if (worker !== child) return;
     worker = undefined;
-    pending?.reject(new Error("Python bridge stopped. Install Python 3.10+ and Playwright. Set FANZY_PYTHON to the interpreter path if needed."));
+    pending?.reject(new Error("Python 发布进程已停止，请检查 Python 3.10 及以上版本和 Playwright 安装，必要时通过 FANZY_PYTHON 设置解释器路径。"));
     pending = undefined;
   };
   child.on("error", error => { void log({ source: "app", level: "error", step: "python.spawn_failed", message: "Python 启动失败", detail: errorDetail(error) }); fail(); });
@@ -106,7 +107,7 @@ async function request(payload: object, checkpoint = async () => {}) {
       if (worker === child) worker = undefined;
       child.kill();
       void log({ source: "app", level: "error", step: "task.timeout", message: "等待浏览器或 Python 超时，已终止发布进程" });
-      reject(new Error("Browser publishing timed out. Review the browser and task status before retrying."));
+      reject(new Error("浏览器发布超时，重试前请核对平台和任务状态。"));
     }, 240_000);
     pending = {
       resolve: (result) => { clearTimeout(timer); resolve(result); },
@@ -117,91 +118,92 @@ async function request(payload: object, checkpoint = async () => {}) {
 }
 
 export async function openPlatformBrowser(platform: Platform) {
-  if (!["instagram", "x", "pinterest"].includes(platform)) throw new Error("Invalid platform");
-  if (busy) throw new Error("Wait for the current browser operation to finish");
+  if (!["instagram", "x", "pinterest", "tiktok"].includes(platform)) throw new Error("无效的平台");
+  if (busy) throw new Error("请等待当前浏览器操作完成");
   busy = true;
   try {
     void log({ source: "app", level: "info", step: "account.inspect", message: "请求打开平台账号页面", platform });
     const result = await request({ action: "login", platform, ...browserOptions() });
-    if (result.state !== "opened") throw new Error(result.message || "Could not open browser");
+    if (result.state !== "opened") throw new Error(result.message || "无法打开浏览器");
   } finally { busy = false; }
 }
 
 export async function closePlatformBrowser(platform: Platform) {
-  if (!["instagram", "x", "pinterest"].includes(platform)) throw new Error("Invalid platform");
-  if (busy) throw new Error("Wait for the current browser operation to finish");
+  if (!["instagram", "x", "pinterest", "tiktok"].includes(platform)) throw new Error("无效的平台");
+  if (busy) throw new Error("请等待当前浏览器操作完成");
   busy = true;
   try {
     const result = await request({ action: "close_login", platform, ...browserOptions() });
-    if (result.state !== "opened") throw new Error(result.message || "Could not close login browser");
+    if (result.state !== "opened") throw new Error(result.message || "无法关闭登录窗口");
   } finally { busy = false; }
 }
 
 export async function publishDrafts(ids: string[]) {
-  if (busy) throw new Error("A publishing batch is already running");
-  if (!Array.isArray(ids) || !ids.length || ids.length > 100 || ids.some((id) => typeof id !== "string")) throw new Error("Select 1–100 drafts");
+  if (busy) throw new Error("已有发布批次正在运行");
+  if (!Array.isArray(ids) || !ids.length || ids.length > 100 || ids.some((id) => typeof id !== "string")) throw new Error("请选择 1 至 100 条草稿");
   const drafts = [...new Set(ids)].map((id) => {
     const draft = findDraft(id);
-    if (!draft) throw new Error("Draft no longer exists");
-    if (draft.status === "published" || ["running", "uncertain", "succeeded", "scheduled"].includes(draft.browserPublish?.state || "")) throw new Error("Resolve previous publication results before retrying");
+    if (!draft) throw new Error("草稿已不存在");
+    if (draft.status === "published" || ["running", "uncertain", "succeeded", "scheduled"].includes(draft.browserPublish?.state || "")) throw new Error("重试前请先核对之前的发布结果");
     if (draft.xScheduledAt && (draft.platform !== "x" || !Number.isFinite(Date.parse(draft.xScheduledAt)) || Date.parse(draft.xScheduledAt) < Date.now()+300000)) throw new Error("X 定时发布时间必须至少在 5 分钟以后，请重新设置");
     return draft;
   });
   busy = true;
   drafts.forEach((draft) => locked.add(draft.id));
+  setPerformancePublishing(true);
   void log({ source: "app", level: "info", step: "batch.start", message: `开始批量发布，共 ${drafts.length} 条草稿` });
   const blocked = new Set<Platform>();
   try {
     for (const draft of drafts) {
       if (blocked.has(draft.platform)) {
-        await record(draft.id, "needs_attention", "An earlier task on this platform needs attention. This task was not submitted.");
+        await record(draft.id, "needs_attention", "此平台的上一条任务需要处理，当前任务尚未提交。");
         continue;
       }
       let submittedAt: string | undefined;
       try {
-        await record(draft.id, "running", "Preparing images and opening platform…");
+        await record(draft.id, "running", "正在准备图片并打开平台…");
         const { folder } = await prepareDraft(draft.id, false);
         void log({ source: "app", level: "info", step: "images.prepared", message: `已准备 ${draft.imageIds.length} 张平台图片`, draftId: draft.id, platform: draft.platform });
         const files = (await fs.readdir(folder)).filter((file) => /^\d+-.*\.jpg$/.test(file)).sort().map((file) => path.join(folder, file));
-        if (files.length !== draft.imageIds.length) throw new Error("Prepared image count does not match draft");
+        if (files.length !== draft.imageIds.length) throw new Error("已准备的图片数量与草稿不一致");
         const result = await request({ action: "publish", ...draft, files, ...browserOptions() }, async () => {
           submittedAt = new Date().toISOString();
-          await record(draft.id, "uncertain", "Submitting. Do not retry until the result is verified.", submittedAt);
+          await record(draft.id, "uncertain", "正在提交，确认结果前请勿重试。", submittedAt);
         });
         if (result.state === "succeeded") {
           updateDraftRecord(draft.id, { status: draft.xScheduledAt ? "platform_scheduled" : "published", publishedUrl: result.url || null });
-          await record(draft.id, draft.xScheduledAt ? "scheduled" : "succeeded", result.message || "Published", submittedAt);
+          await record(draft.id, draft.xScheduledAt ? "scheduled" : "succeeded", result.message || "发布成功", submittedAt);
         } else {
-          await record(draft.id, submittedAt ? "uncertain" : "needs_attention", result.message || "Review browser", submittedAt);
+          await record(draft.id, submittedAt ? "uncertain" : "needs_attention", result.message || "请检查浏览器页面", submittedAt);
           blocked.add(draft.platform);
         }
       } catch (error) {
-        void log({ source: "app", level: "error", step: "task.failed", message: "发布任务失败", detail: errorDetail(error), draftId: draft.id, platform: draft.platform });
-        await record(draft.id, submittedAt ? "uncertain" : "needs_attention", error instanceof Error ? error.message : "Browser operation failed", submittedAt);
+        void log({ source: "app", level: submittedAt ? "warn" : "error", step: submittedAt ? "task.uncertain" : "task.failed", message: submittedAt ? "已提交，结果待确认" : "发布任务失败", detail: errorDetail(error), draftId: draft.id, platform: draft.platform });
+        await record(draft.id, submittedAt ? "uncertain" : "needs_attention", submittedAt ? "已提交，结果待确认" : error instanceof Error ? error.message : "浏览器操作失败", submittedAt);
         blocked.add(draft.platform);
       }
     }
     return drafts;
-  } finally { locked.clear(); busy = false; void log({ source: "app", level: "info", step: "batch.finished", message: `批次结束：${drafts.filter(d => d.status === "published").length}/${drafts.length} 已发布` }); }
+  } finally { locked.clear(); busy = false; setPerformancePublishing(false); void log({ source: "app", level: "info", step: "batch.finished", message: `批次结束：${drafts.filter(d => d.status === "published").length}/${drafts.length} 已发布` }); }
 }
 
 export async function resolvePublish(id: string, published: boolean) {
   assertNotPublishing(id);
-  if (typeof published !== "boolean") throw new Error("Invalid resolution");
+  if (typeof published !== "boolean") throw new Error("无效的核对结果");
   const draft = findDraft(id);
-  if (!draft || draft.browserPublish?.state !== "uncertain") throw new Error("No uncertain publication to resolve");
+  if (!draft || draft.browserPublish?.state !== "uncertain") throw new Error("没有待核对的发布任务");
   if (published) {
     updateDraftRecord(id, { status: draft.xScheduledAt ? "platform_scheduled" : "published" });
-    await record(id, draft.xScheduledAt ? "scheduled" : "succeeded", draft.xScheduledAt ? "用户已在 X 确认排程存在。" : "Publication confirmed manually by the user.");
+    await record(id, draft.xScheduledAt ? "scheduled" : "succeeded", draft.xScheduledAt ? "用户已在 X 确认排程存在。" : "用户已手动确认发布成功。");
   } else {
-    await record(id, "needs_attention", "User verified that no post was published. Retry is now available.");
+    await record(id, "needs_attention", "用户已确认未发布，现在可以重试。");
   }
 }
 
 export async function recoverPublishing() {
   for (const draft of getStore().drafts) {
     if (draft.browserPublish?.state === "running") {
-      draft.browserPublish = { state: "needs_attention", message: "App closed before submission. Review the browser before retrying." };
+      draft.browserPublish = { state: "needs_attention", message: "程序在提交前关闭，重试前请核对浏览器。" };
     }
   }
   await persistStore();

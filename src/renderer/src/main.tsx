@@ -2,6 +2,11 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./style.css";
+import { startUiPerformanceMonitor } from "./performance-monitor";
+
+const stopPerformanceMonitor = startUiPerformanceMonitor();
+window.addEventListener("pagehide", stopPerformanceMonitor, {once:true});
+if (import.meta.hot) import.meta.hot.dispose(stopPerformanceMonitor);
 
 window.addEventListener("error", event => {
   void window.reach?.reportRendererError?.(event.message, event.error?.stack)?.catch(() => {});

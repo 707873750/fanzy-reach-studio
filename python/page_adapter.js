@@ -2,7 +2,7 @@
 (() => {
   if (globalThis.fanzyPublisher) return;
   let current = null;
-  const hosts = {x:'x.com',instagram:'www.instagram.com',pinterest:'www.pinterest.com'};
+  const hosts = {x:'x.com',instagram:'www.instagram.com',pinterest:'www.pinterest.com',tiktok:'www.tiktok.com'};
   async function trace(step,message,level='info',detail) {
     try { await globalThis.fanzyTrace({step,message,level,detail}); } catch {}
   }
@@ -131,11 +131,12 @@
     await trace('pinterest.alt_text','已填写并核对替代文本（不记录正文）');
   }
   function caption(job,withTitle=true) { return [withTitle?job.title:'',job.caption,job.hashtags.join(' ')].filter(Boolean).join('\n\n'); }
-  function success(platform) {
+  function success(platform,root=document) {
+    if(platform==='tiktok') return all('[role="status"],[role="alert"],h1,h2,h3').some(node=>visible(node)&&/^(Your (?:post|photos) (?:has|have) been published|Post published|已发布|发布成功)[.!。！]?$/i.test(node.textContent.trim()));
     if(platform==='x' && current.scheduleAt) return all('[data-testid="toast"]').some(node=>visible(node)&&/Your post (will be sent|was scheduled)|你的(帖子|推文)将于|你的(貼文|推文)將於|已排程|已安排定时/i.test(node.textContent));
-    const patterns={x:/^(Your post was sent\.?|你的帖子已发送[。！]?|你的推文已发送[。！]?)$/i,instagram:/^(Your post has been shared[.!]?|你的帖子已分享[。！]?|你的貼文已分享[。！]?|已分享你的貼文[。！]?)$/i,pinterest:/^(Your Pin has been published[.!]?|Pin published[.!]?|你的 Pin 已发布[。！]?)$/i};
+    const patterns={x:/^(Your post was sent\.?|你的帖子已发送[。！]?|你的推文已发送[。！]?)$/i,instagram:/^(Your post has been shared[.!]?|你的帖子已分享[。！]?|你的貼文已分享[。！]?|已分享你的貼文[。！]?)$/i,pinterest:/^(?:(?:Your\s+)?Pin\s+(?:has been\s+)?(?:successfully\s+)?published|(?:你[的]?\s*)?Pin\s*(?:图|圖)?\s*(?:已成功发布|已發佈|已發布|已发布|发布成功|發佈成功|發布成功))[.!。！]?$/i};
     const selector=platform==='x'?'[data-testid="toast"] *,[data-testid="toast"]':'h1,h2,h3,[role="status"],[role="alert"],span,p';
-    return all(selector).some(node=>visible(node)&&patterns[platform].test(node.textContent.trim()));
+    return [...(root.matches?.(selector)?[root]:[]),...all(selector,root)].some(node=>visible(node)&&patterns[platform].test(node.textContent.trim()));
   }
   async function upload(selector, root=document) {
     const input=await wait(()=>unique(all(selector,root).filter(node=>!node.disabled&&!node.closest('[aria-hidden="true"],[inert]')),'图片上传控件'),'图片上传控件');
@@ -149,6 +150,7 @@
     await trace('images.attached','图片已交给平台上传控件，等待平台处理');
   }
   function finalButton(platform) {
+    if(platform==='tiktok') return findButton(/^(Post|Publish|发布|發佈)$/i);
     if(platform==='x') {
       const node=unique(xAll('[data-testid="tweetButton"],[data-testid="tweetButtonInline"]').filter(visible),'X 发帖窗口内的发布按钮');
       if(current.scheduleAt && node && !/^(Schedule|排程|安排|定时|預約|預定)$/i.test(name(node).trim())) return null;
@@ -201,6 +203,10 @@
     if(phase==='begin') {
       if(current && current.id!==job.id) throw Error('该标签页已有任务');
       current={id:job.id,platform:job.platform,files:[],prepared:false,submitted:false};await trace('page.begin','Playwright 页面发布任务初始化');return;
+    }
+    if(phase==='confirm_pinterest') {
+      if(current?.platform==='pinterest'&&current.submitted&&/^https:\/\/www\.pinterest\.com\/pin\/\d+\/$/.test(extra?.url||'')) current.confirmedUrl=extra.url;
+      return;
     }
     if(!current||current.id!==job.id) throw Error('任务上下文已丢失');
     if(phase==='instagram_open_state') {
@@ -260,6 +266,30 @@
           }
           await trace('instagram.alt_text','已填写并核对 '+fields.length+' 个图片替代文本字段（不记录正文）');
         }
+      } else if(job.platform==='tiktok') {
+        const imageInput=()=>unique(all('input[type="file"]').filter(node=>!node.disabled&&!node.closest('[aria-hidden="true"],[inert]')&&/(image\/|\.(?:jpe?g|png|webp)(?:,|$))/i.test(node.accept)), 'TikTok 图片上传控件');
+        if(!imageInput()) {
+          const photos=unique(all('button,[role="button"],[role="tab"]').filter(node=>visible(node)&&/^(Photos|Photo|Upload photos|图片|照片|上传照片|上传图片)$/i.test(name(node).trim())), 'TikTok 图片模式');
+          if(photos) photos.click();
+        }
+        let input;
+        try { input=await wait(imageInput,'TikTok 图片上传入口',15000); }
+        catch { throw Error('当前 TikTok 网页端未提供可识别的图片上传入口。请确认登录并开启图片模式；仅支持视频时，请将准备好的图片通过 TikTok 手机端发布。未提交任何内容。'); }
+        if(job.fileCount>1&&!input.multiple) throw Error('当前 TikTok 上传入口不支持多图轮播，未提交');
+        input.setAttribute('data-fanzy-photo-input','true');
+        await upload('input[data-fanzy-photo-input="true"]');
+        // Require one visible local preview for every photo; unrelated remote avatars do not count.
+        await wait(()=>all('img').filter(node=>visible(node)&&/^(blob:|data:image\/)/i.test(node.currentSrc||node.src)).length===job.fileCount,'TikTok 全部图片预览');
+        if(job.title) await field(/^(Title|Add title|Add a title|标题|添加标题)$/i,job.title);
+        const description=await wait(()=>findField(/^(Description|Caption|Add a description|描述|说明|添加描述|添加说明)[.…]*$/i),'TikTok 描述');
+        await fill(description,caption(job,false));
+        await wait(()=>description.isConnected&&(description.isContentEditable?description.innerText:description.value)===caption(job,false),'TikTok 描述填写确认');
+        if(job.altText) {
+          const fields=all('input,textarea').filter(node=>visible(node)&&/(Alt text|替代文本|替代文字)/i.test(name(node)));
+          if(fields.length!==job.fileCount) throw Error('TikTok 替代文本字段不完整，请在平台确认后再发布');
+          for(const node of fields) await fill(node,job.altText);
+        }
+        await trace('tiktok.photos_ready','已核对图片数量与描述，等待提交检查点');
       } else {
         if(!job.boardName.trim()) throw Error('请填写 Pinterest 画板名称');
         await upload('input[type="file"]');
@@ -311,10 +341,30 @@
       const control=finalButton(job.platform);
       if(control!==current.control||!visible(control)||control.disabled||control.getAttribute('aria-disabled')==='true'||success(job.platform)) throw Error('提交前页面发生变化');
       await trace('submit.click',current.scheduleAt?'点击最终排程按钮':'点击最终发布按钮');
-      current.submitted=true;control.click();
-      await wait(()=>success(job.platform),current.scheduleAt?'X 排程成功确认':'平台发布成功确认',45000);
-      await trace('submit.success',current.scheduleAt?'X 已确认排程：'+current.scheduleAt:'平台发布成功确认已出现');
-      return {url:location.href};
+      let observed=false;
+      const capture=()=>{if(success(job.platform)) observed=true;};
+      const observer=new MutationObserver(records=>{
+        if(observed) return;
+        for(const record of records) {
+          const nodes=record.type==='childList'?[...record.addedNodes]:[record.target];
+          if(nodes.some(node=>{const root=node.nodeType===Node.ELEMENT_NODE?node:node.parentElement;return root&&success(job.platform,root);})) {observed=true;break;}
+        }
+      });
+      if(job.platform==='pinterest') observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['hidden','style','class','aria-hidden']});
+      try {
+        current.submitted=true;control.click();capture();
+        await trace('control.wait',current.scheduleAt?'等待：X 排程成功确认':'等待：平台发布成功确认');
+        const deadline=Date.now()+45000;
+        while(Date.now()<deadline) {
+          if(observed||current.confirmedUrl||success(job.platform)) {
+            await trace('submit.success',current.confirmedUrl?'Pinterest 已返回本次创建的 Pin 链接':current.scheduleAt?'X 已确认排程：'+current.scheduleAt:'平台发布成功确认已出现');
+            return {state:'succeeded',url:current.confirmedUrl||location.href};
+          }
+          await pause(250);
+        }
+        await trace('submit.unconfirmed','已提交，结果待确认','warn');
+        return {state:'uncertain',message:'已提交，结果待确认'};
+      } finally {observer.disconnect();}
     }
     throw Error('未知任务阶段');
   };
