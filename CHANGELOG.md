@@ -1,5 +1,20 @@
 # Changelog
 
+## Pinterest board selection and log rendering
+- Searches the requested board within the board picker and reports Pinterest's explicit no-results state before submission.
+- Memoizes unchanged log rows and shares the date formatter to avoid repeatedly formatting/rendering the entire log history for each new event.
+- Verified the requested public test board was created; no post was published during diagnosis.
+
+## Pinterest field and publishing performance diagnostics
+- Recognizes the observed alternative-text placeholder 描述你 Pin 图的视觉详细信息.
+- Reduces control polling from 200 ms to 500 ms and requires a user gesture for browser media autoplay.
+- Logs aggregate Windows CPU/available memory and page main-thread/JS heap counters every five seconds while publishing; cancels monitoring before browser cleanup.
+
+## Pinterest alternative text
+- Supports visible alternative-text fields, direct buttons, and fields/buttons under More options in English and Chinese.
+- Checks filled alternative text before continuing; does not silently omit it or submit on failure.
+- Local regressions cover delayed expansion, already-visible fields, nested buttons, and Chinese title/description/board labels.
+
 ## Native Chrome login handoff
 - All platforms log in through ordinary Chrome with isolated profiles and no automation/debugging flags.
 - Finish Login closes only that dedicated browser normally, then captures an encrypted snapshot through headless Playwright without restoring stale state first.

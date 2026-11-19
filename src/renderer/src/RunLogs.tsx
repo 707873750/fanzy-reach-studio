@@ -1,6 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { Copy, FolderOpen, RefreshCw } from "lucide-react";
 import type { RunLog } from "../../shared/types";
+
+const logTime = new Intl.DateTimeFormat("zh-CN", {dateStyle:"short", timeStyle:"medium", hour12:false});
+const LogRow = memo(function LogRow({entry}: {entry: RunLog}) {
+  return <article className={`log-row log-${entry.level}`}>
+    <div className="log-meta"><time dateTime={entry.time}>{logTime.format(new Date(entry.time))}</time><strong>{entry.level.toUpperCase()}</strong><span>{entry.source}</span>{entry.platform && <span>{entry.platform}</span>}<code>{entry.step}</code></div>
+    <div className="log-message">{entry.message}</div>
+    <details><summary>详情{entry.draftId ? ` · 草稿 ${entry.draftId.slice(0, 8)}` : ""}</summary><pre>{[entry.draftId && `草稿：${entry.draftId}`, entry.jobId && `执行：${entry.jobId}`, `会话：${entry.sessionId}`, entry.detail].filter(Boolean).join("\n")}</pre></details>
+  </article>;
+});
 
 function mergeLogs(first: RunLog[], second: RunLog[]) {
   return [...new Map([...first, ...second].map(entry => [entry.id, entry])).values()].sort((a, b) => a.time.localeCompare(b.time)).slice(-1000);
@@ -69,11 +78,7 @@ export default function RunLogs({ draftId = "" }: { draftId?: string }) {
       <p className="muted">当前匹配 {filtered.length} 条 · 时间使用本机时区 · 点击记录下方的详情查看错误堆栈和任务标识</p>
       <div className="log-list" aria-label="运行日志列表">
         {!filtered.length && <div className="empty-mini">{loading ? "正在读取…" : "没有匹配的日志。新操作产生的日志会自动出现。"}</div>}
-        {[...filtered].reverse().map(entry => <article key={entry.id} className={`log-row log-${entry.level}`}>
-          <div className="log-meta"><time dateTime={entry.time}>{new Date(entry.time).toLocaleString("zh-CN", { hour12: false })}</time><strong>{entry.level.toUpperCase()}</strong><span>{entry.source}</span>{entry.platform && <span>{entry.platform}</span>}<code>{entry.step}</code></div>
-          <div className="log-message">{entry.message}</div>
-          <details><summary>详情{entry.draftId ? ` · 草稿 ${entry.draftId.slice(0, 8)}` : ""}</summary><pre>{[entry.draftId && `草稿：${entry.draftId}`, entry.jobId && `执行：${entry.jobId}`, `会话：${entry.sessionId}`, entry.detail].filter(Boolean).join("\n")}</pre></details>
-        </article>)}
+        {[...filtered].reverse().map(entry => <LogRow key={entry.id} entry={entry}/>)}
       </div>
     </section>
   </>;

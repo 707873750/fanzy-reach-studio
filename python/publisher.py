@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 from adapters import URLS, validate
 import session_store
 from native_login import NativeChrome
+from performance_stats import system_sample
 
 ADAPTER_PATH = Path(__file__).with_name('page_adapter.js')
 CHANNELS = ('msedge', 'chrome', 'chromium')
@@ -58,6 +59,7 @@ class Publisher:
         try:
             context = await self.playwright.chromium.launch_persistent_context(
                 str(profile), channel=request.get('channel', 'chrome'), headless=not visible,
+                args=['--autoplay-policy=user-gesture-required'],
                 viewport={'width': 1440, 'height': 1000}, timeout=30000)
         except Exception as error:
             raise RuntimeError('浏览器启动失败。请确认所选浏览器已安装，且该平台的专用窗口已关闭。Chromium 需运行 python -m playwright install chromium。') from error
@@ -172,14 +174,15 @@ class Publisher:
         job = {**request, 'jobId': uuid.uuid4().hex, 'fileCount': len(request['files'])}
         job.setdefault('id', job['jobId'])
         job.setdefault('hashtags', [])
-        context = page = None
+        context = page = monitor = None
         checkpoint_requested = False
         self.log('job.start', '开始 Playwright 发布任务', job)
         try:
             async def execute():
-                nonlocal context, page, checkpoint_requested
+                nonlocal context, page, monitor, checkpoint_requested
                 context = await self.launch(job, visible=job.get('showBrowser') is True)
                 page = context.pages[0] if context.pages else await context.new_page()
+                monitor = asyncio.create_task(self.monitor_page(page, job))
                 page.on('pageerror', lambda error: self.log('page.error', '平台页面脚本异常', job, 'error', str(error)))
                 page.on('requestfailed', lambda req: self.log('network.failed', '网络请求失败：'+urlsplit(req.url).netloc, job, 'warn', req.failure))
                 async def trace(source, entry):
@@ -227,6 +230,9 @@ class Publisher:
                     self.log('failure.screenshot_failed', '无法保存失败截图', job, 'warn', str(screenshot_error))
             return {'state': 'uncertain' if checkpoint_requested else 'needs_attention', 'message': message}
         finally:
+            if monitor:
+                monitor.cancel()
+                await asyncio.gather(monitor, return_exceptions=True)
             if context:
                 try:
                     await self.save_session(context, job)
@@ -237,6 +243,37 @@ class Publisher:
                     self.log('browser.closed', '浏览器已关闭，登录配置已保存', job)
                 except Exception as error:
                     self.log('browser.close_failed', str(error), job, 'warn')
+
+    async def monitor_page(self, page, job):
+        """Low-rate diagnostic counters, never page content or form values."""
+        session = None
+        try:
+            session = await page.context.new_cdp_session(page)
+            await session.send('Performance.enable')
+            previous = None
+            system_previous = None
+            while True:
+                response = await session.send('Performance.getMetrics')
+                metrics = {item['name']: item['value'] for item in response['metrics']}
+                now = asyncio.get_running_loop().time()
+                cpu = None if previous is None else max(0, metrics.get('TaskDuration', 0)-previous[1]) / max(now-previous[0], .001)*100
+                previous = (now, metrics.get('TaskDuration', 0))
+                heap = metrics.get('JSHeapUsedSize', 0)/1048576
+                system, system_previous = system_sample(system_previous)
+                detail = json.dumps({**system, 'pageMainThreadBusyPercent': None if cpu is None else round(cpu,1),
+                                     'jsHeapMB':round(heap,1), 'domNodes':metrics.get('Nodes',0),
+                                     'openPages':len(page.context.pages)})
+                self.log('performance.sample', '性能采样：整机 CPU / 可用内存及发布页面主线程 / JS 内存', job,
+                         'warn' if cpu is not None and cpu>80 else 'info', detail)
+                await asyncio.sleep(5)
+        except Exception as error:
+            self.log('performance.unavailable', '无法读取页面性能指标，不影响发布', job, 'warn', type(error).__name__)
+        finally:
+            if session:
+                try:
+                    await session.detach()
+                except Exception:
+                    pass
 
     async def open_publish_page(self, page, job):
         """Report document failures without retrying or reaching submission."""

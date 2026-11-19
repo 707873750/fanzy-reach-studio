@@ -71,7 +71,7 @@
     const started=Date.now();
     await trace('control.wait', '等待：'+label);
     try {
-      while(Date.now()<started+timeout) { checkAccount(); const value=find(); if(value) { await trace('control.ready', label+'已就绪（'+(Date.now()-started)+' ms）'); return value; } await pause(200); }
+      while(Date.now()<started+timeout) { checkAccount(); const value=find(); if(value) { await trace('control.ready', label+'已就绪（'+(Date.now()-started)+' ms）'); return value; } await pause(500); }
       throw Error('未找到或未就绪：'+label+'。请检查登录、验证或平台页面变化');
     } catch(error) {
       const root=current?.composer?.isConnected?current.composer:document;
@@ -96,6 +96,40 @@
     }
   }
   async function field(pattern,text) { await fill(await wait(()=>findField(pattern),'文本框'),text); }
+  async function pinterestAltText(text) {
+    const label=/(Alt(?:ernative)? text|替代文本|替代文字|备用文本|替換文字|描述你\s*Pin\s*图的视觉详细信息|Describe your Pin.s visual details)/i;
+    const direct=/^(Add alt text|Add alternative text|添加替代文本|添加替代文字|替代文本|替代文字)$/i;
+    const more=/^(More options|更多选项|更多選項)$/i;
+    const entry=await wait(()=>{
+      const input=findField(label);
+      if(input) return {input};
+      const button=findButton(direct);
+      if(button) return {button};
+      const section=findButton(more);
+      return section?{section}:null;
+    },'Pinterest 替代文本入口或更多选项');
+    if(entry.section) {
+      if(entry.section.getAttribute('aria-expanded')!=='true') {
+        await trace('pinterest.options','展开更多选项，查找替代文本');
+        entry.section.click();
+      }
+      const expanded=await wait(()=>{
+        const input=findField(label);
+        if(input) return {input};
+        const button=findButton(direct);
+        return button?{button}:null;
+      },'更多选项中的替代文本字段');
+      Object.assign(entry,expanded);
+    }
+    if(entry.button) {
+      await wait(()=>!entry.button.disabled&&entry.button.getAttribute('aria-disabled')!=='true','替代文本按钮可用');
+      entry.button.click();
+    }
+    const input=await wait(()=>findField(label),'Pinterest 替代文本字段');
+    await fill(input,text);
+    await wait(()=>input.isConnected&&(input.isContentEditable?input.innerText:input.value)===text,'Pinterest 替代文本填写确认');
+    await trace('pinterest.alt_text','已填写并核对替代文本（不记录正文）');
+  }
   function caption(job,withTitle=true) { return [withTitle?job.title:'',job.caption,job.hashtags.join(' ')].filter(Boolean).join('\n\n'); }
   function success(platform) {
     if(platform==='x' && current.scheduleAt) return all('[data-testid="toast"]').some(node=>visible(node)&&/Your post (will be sent|was scheduled)|你的(帖子|推文)将于|你的(貼文|推文)將於|已排程|已安排定时/i.test(node.textContent));
@@ -229,11 +263,41 @@
       } else {
         if(!job.boardName.trim()) throw Error('请填写 Pinterest 画板名称');
         await upload('input[type="file"]');
-        await field(/^(Title|Add your title|标题|添加标题)$/i,job.title);
-        await field(/(Description|Tell everyone|描述|说明)/i,caption(job,false));
-        if(job.altText) { await click(/^(Add alt text|添加替代文本)$/i); await field(/(Alt text|替代文本)/i,job.altText); }
-        await click(/^(Choose a board|Select a board|选择画板|Board|画板)$/i);
-        const board=await wait(()=>unique(all('button,[role="button"]').filter(node=>visible(node)&&name(node).trim()===job.boardName)),'目标画板');board.click();
+        await trace('pinterest.title','等待 Pinterest 标题字段');
+        await field(/^(Title|Add your title|标题|添加标题|简要描述你的\s*Pin\s*图)$/i,job.title);
+        await trace('pinterest.description','等待 Pinterest 描述字段');
+        await field(/^(Description|Add a description|Tell everyone(?: what your Pin is about)?|描述|说明|描述你的\s*Pin\s*图)[.…]*$/i,caption(job,false));
+        if(job.altText) await pinterestAltText(job.altText);
+        const boardPattern=/^(?:(?:Board|画板|图板)\s*)?(Choose a board|Select a board|选择画板|选择一块图板|选择图板|Board|画板|图板)$/i;
+        const picker=await wait(()=>{
+          const usable=node=>visible(node)&&!node.disabled&&node.getAttribute('aria-disabled')!=='true';
+          // Once Pinterest remembers a board, its name replaces "Choose a board".
+          // Use the observed stable control marker, then retain older-layout labels.
+          const marked=unique(all('[data-test-id="board-dropdown-select-button"]').filter(usable),'Pinterest 图板入口');
+          return marked || unique(all('button,[role="button"],[role="combobox"]').filter(node=>usable(node)&&boardPattern.test(name(node).trim())),'Pinterest 图板入口');
+        },'Pinterest 图板入口');
+        picker.click();
+        let boardRoot=document;
+        const matchBoard=()=>unique(all('button,[role="button"],[role="option"],[role="menuitem"]',boardRoot).filter(node=>visible(node)&&!node.disabled&&node.getAttribute('aria-disabled')!=='true'&&name(node).trim()===job.boardName.trim()),'目标图板');
+        const opened=await wait(()=>{
+          const search=findField(/^(Search your boards|Search through your boards|通过你的图板搜索)$/i);
+          if(search) return {search};
+          const board=matchBoard();
+          return board?{board}:null;
+        },'图板搜索或目标图板');
+        if(opened.search) {
+          boardRoot=opened.search.closest('section,[role="dialog"],[role="listbox"]');
+          if(!boardRoot) throw Error('无法确定图板搜索结果区域，已停止避免误选');
+          await fill(opened.search,job.boardName.trim());
+          await trace('pinterest.board_search','已搜索目标图板，等待匹配结果');
+          await pause(700);
+        }
+        const board=await wait(()=>{
+          const node=matchBoard();
+          if(node) return node;
+          if(boardRoot!==document&&/(未找到图板|No boards found|No results found)/i.test(boardRoot.textContent)) throw Error('Pinterest 未找到目标图板：'+job.boardName.trim()+'。请先创建该图板或修改草稿中的图板名称；未点击发布');
+          return null;
+        },'目标图板');board.click();
       }
       current.control=await wait(()=>finalButton(job.platform),'发布按钮');
       await wait(()=>!current.control.disabled&&current.control.getAttribute('aria-disabled')!=='true','发布按钮可用');

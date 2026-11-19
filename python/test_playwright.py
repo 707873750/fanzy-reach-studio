@@ -66,6 +66,9 @@ class PlaywrightPublishingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result['state'],'succeeded',result)
         self.assertEqual(self.launches,[False,True,False])
         self.assertEqual(sum(e['step']=='submit.click' for e in self.events),3)
+        samples = [e for e in self.events if e['step']=='performance.sample']
+        self.assertGreaterEqual(len(samples), 3)
+        self.assertTrue(all('jsHeapMB' in e['detail'] for e in samples))
         self.assertFalse(any('PRIVATE fixture caption' in e['message'] for e in self.events))
 
     async def test_x_navigation_denied_never_submits(self):
@@ -87,6 +90,74 @@ class PlaywrightPublishingTests(unittest.IsolatedAsyncioTestCase):
         result = await self.runner.publish(self.job, self.checkpoint)
         self.assertEqual(result['state'], 'succeeded', result)
         self.assertTrue(any(e['step']=='images.preview_ready' for e in self.events))
+
+    async def test_pinterest_chinese_fields_and_board(self):
+        self.fixture['pinterest'] = PINTEREST.replace(
+            '<input aria-label="Title"><textarea aria-label="Description"></textarea>',
+            '<input placeholder="简要描述你的 Pin 图"><div role="combobox" contenteditable="true" aria-label="描述你的 Pin 图"></div><input placeholder="搜索标签">'
+        ).replace('Choose a board', '图板\n选择一块图板').replace(
+            '<button id="board"', '<button role="option" id="board"')
+        async def checkpoint():
+            page = self.context.pages[0]
+            self.assertEqual(await page.locator('input[placeholder="简要描述你的 Pin 图"]').input_value(), 'Pin title')
+            self.assertEqual(await page.locator('[contenteditable]').inner_text(), self.job['caption'])
+            self.assertEqual(await page.locator('input[placeholder="搜索标签"]').input_value(), '')
+            self.assertEqual(await page.evaluate('window.board'), 'Art')
+            return await self.checkpoint()
+        result = await self.runner.publish({**self.job, 'platform':'pinterest', 'title':'Pin title'}, checkpoint)
+        self.assertEqual(result['state'], 'succeeded', result)
+
+    async def test_pinterest_alt_text_variants(self):
+        for mode in ('direct', 'more', 'expanded', 'more_button', 'visual_details'):
+            hidden = '' if mode=='expanded' else 'hidden'
+            alt = f'<textarea id="alt" aria-label="替代文字" {hidden}></textarea>'
+            if mode=='visual_details':
+                alt = '<textarea id="alt" placeholder="描述你 Pin 图的视觉详细信息" hidden></textarea>'
+            show = "setTimeout(()=>document.querySelector('#alt').hidden=false,300)"
+            if mode=='direct':
+                alt += f'<button onclick="{show}">添加替代文本</button>'
+            elif mode in ('more', 'visual_details'):
+                alt += f'<div role="button" onclick="window.expanded=(window.expanded||0)+1;{show}">更多选项</div>'
+            elif mode=='more_button':
+                alt += f'<button id="add-alt" hidden onclick="{show}">Add alt text</button><button onclick="document.querySelector(\'#add-alt\').hidden=false">More options</button>'
+            self.fixture['pinterest'] = PINTEREST.replace('</body>', alt+'</body>')
+            async def checkpoint():
+                page = self.context.pages[0]
+                self.assertEqual(await page.locator('#alt').input_value(), 'PRIVATE alt fixture')
+                if mode=='more':
+                    self.assertEqual(await page.evaluate('window.expanded'), 1)
+                return await self.checkpoint()
+            result = await self.runner.publish({**self.job,'platform':'pinterest','altText':'PRIVATE alt fixture'}, checkpoint)
+            self.assertEqual(result['state'],'succeeded',(mode,result))
+        self.assertFalse(any('PRIVATE alt fixture' in e.get('message','') for e in self.events))
+
+    async def test_pinterest_board_search_and_missing(self):
+        for missing in (False, True):
+            original='<button id="board" hidden onclick="window.board=\'Art\';this.hidden=true">Art</button>'
+            results = '<p>未找到图板</p>' if missing else '<button onclick="window.board=\'Art\'">Art</button>'
+            panel='<section id="board" hidden><input aria-label="通过你的图板搜索" oninput="document.querySelector(\'#results\').hidden=false"><div id="results" hidden>'+results+'</div></section>'
+            self.fixture['pinterest']=PINTEREST.replace(original,panel)
+            async def checkpoint():
+                self.assertFalse(missing, 'Missing board must not submit')
+                self.assertEqual(await self.context.pages[0].get_by_label('通过你的图板搜索').input_value(), 'Art')
+                return await self.checkpoint()
+            result=await self.runner.publish({**self.job,'platform':'pinterest'},checkpoint)
+            self.assertEqual(result['state'],'needs_attention' if missing else 'succeeded',result)
+            if missing:
+                self.assertIn('未找到目标图板',result['message'])
+
+    async def test_pinterest_remembered_board_picker(self):
+        for remembered in ('Art', 'Different board'):
+            self.fixture['pinterest']=PINTEREST.replace(
+                '<button onclick="document.querySelector(\'#board\').hidden=false">Choose a board</button>',
+                '<button data-test-id="board-dropdown-select-button" onclick="window.pickerOpened=true;document.querySelector(\'#board\').hidden=false">图板\n'+remembered+'</button>')
+            async def checkpoint():
+                page=self.context.pages[0]
+                self.assertTrue(await page.evaluate('window.pickerOpened'))
+                self.assertEqual(await page.evaluate('window.board'),'Art')
+                return await self.checkpoint()
+            result=await self.runner.publish({**self.job,'platform':'pinterest'},checkpoint)
+            self.assertEqual(result['state'],'succeeded',result)
 
     async def test_login_profile_reuse_and_lock(self):
         profile = self.runner.profile(self.job)
