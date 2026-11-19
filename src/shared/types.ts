@@ -1,5 +1,20 @@
 export type Platform = "instagram" | "x" | "pinterest";
-export type DraftStatus = "draft" | "ready" | "scheduled" | "prepared" | "published" | "reminder_due";
+export interface BrowserSettings { showBrowser: boolean; channel: "msedge" | "chrome" | "chromium"; }
+export interface RunLog {
+  id: string;
+  time: string;
+  sessionId: string;
+  level: "info" | "warn" | "error";
+  source: "app" | "python" | "extension" | "page";
+  step: string;
+  message: string;
+  draftId?: string;
+  jobId?: string;
+  platform?: Platform;
+  detail?: string;
+}
+export interface LogSnapshot { entries: RunLog[]; directory: string; storageError: string | null; }
+export type DraftStatus = "draft" | "ready" | "scheduled" | "prepared" | "published" | "reminder_due" | "platform_scheduled";
 
 export interface ImageAsset {
   id: string;
@@ -28,7 +43,8 @@ export interface Draft {
   createdAt: string;
   updatedAt: string;
   boardName?: string;
-  browserPublish?: { state: "running" | "needs_attention" | "uncertain" | "succeeded"; message: string; submittedAt?: string };
+  xScheduledAt?: string | null;
+  browserPublish?: { state: "running" | "needs_attention" | "uncertain" | "succeeded" | "scheduled"; message: string; submittedAt?: string };
 }
 
 export interface SettingsView {
@@ -47,6 +63,14 @@ export interface CreateDraftResult {
 }
 
 export interface ReachApi {
+  reportRendererError: (message: string, detail?: string) => Promise<void>;
+  getLogs: () => Promise<LogSnapshot>;
+  openLogFolder: () => Promise<void>;
+  onRunLog: (callback: (entry: RunLog) => void) => () => void;
+  copyText: (text: string) => Promise<boolean>;
+  getBrowserSettings: () => Promise<BrowserSettings>;
+  saveBrowserSettings: (settings: BrowserSettings) => Promise<BrowserSettings>;
+  closePlatformBrowser: (platform: Platform) => Promise<void>;
   openPlatformBrowser: (platform: Platform) => Promise<void>;
   publishDrafts: (ids: string[]) => Promise<Draft[]>;
   resolvePublish: (id: string, published: boolean) => Promise<void>;
@@ -58,7 +82,7 @@ export interface ReachApi {
   createDrafts: (imageIds: string[], platforms: Platform[]) => Promise<Draft[]>;
   listDrafts: () => Promise<Draft[]>;
   deleteDraft: (draftId: string) => Promise<void>;
-  updateDraft: (draftId: string, patch: Partial<Pick<Draft, "title" | "caption" | "altText" | "hashtags" | "boardName">>) => Promise<Draft>;
+  updateDraft: (draftId: string, patch: Partial<Pick<Draft, "title" | "caption" | "altText" | "hashtags" | "boardName" | "xScheduledAt">>) => Promise<Draft>;
   generateCaption: (draftId: string) => Promise<Draft>;
   getSettings: () => Promise<SettingsView>;
   saveDeepSeekKey: (apiKey: string) => Promise<SettingsView>;

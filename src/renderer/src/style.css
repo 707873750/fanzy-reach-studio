@@ -144,3 +144,20 @@ button { cursor: pointer; }
 
 .draft-select-row { display: flex; align-items: center; gap: 6px; }
 .draft-select-row > input { accent-color: #a18cff; }
+
+.field select { border: 1px solid #373844; border-radius: 7px; padding: 10px 11px; background: #13141b; color: #eee; font-size: 11px; }
+
+.log-filters { display:flex; gap:12px; flex-wrap:wrap; }
+.log-search { flex:1; min-width:240px; }
+.log-path { overflow-wrap:anywhere; }
+.log-list { max-height:65vh; overflow:auto; border-top:1px solid #373844; }
+.log-row { padding:12px; border-bottom:1px solid #373844; border-left:3px solid #6b8bb8; }
+.log-warn { border-left-color:#e7b65b; }
+.log-error { border-left-color:#ff8585; background:#311d232e; }
+.log-meta { display:flex; gap:10px; align-items:center; flex-wrap:wrap; color:#aaaabb; font-size:10px; }
+.log-error strong,.log-storage-error { color:#ff9999; }
+.log-warn strong { color:#e7b65b; }
+.log-message { font-size:12px; margin:8px 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.log-row details { font-size:10px; color:#a5a6b3; }
+.log-row summary { cursor:pointer; }
+.log-row pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; line-height:1.6; }

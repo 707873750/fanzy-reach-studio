@@ -7,7 +7,9 @@ import { importFiles, listImages, deleteImage } from "./image-service";
 import { createDrafts, listDrafts, deleteDraft, updateDraft, prepareDraft, markPublished, scheduleDraft } from "./draft-service";
 import { generateCaption, saveDeepSeekKey, clearDeepSeekKey, getSettings } from "./ai-service";
 import type { Platform } from "../shared/types";
-import { assertNotPublishing, openPlatformBrowser, publishDrafts, resolvePublish, recoverPublishing, stopPublisher } from "./browser-publisher";
+import { assertNotPublishing, getBrowserSettings, saveBrowserSettings, closePlatformBrowser, openPlatformBrowser, publishDrafts, resolvePublish, recoverPublishing, stopPublisher } from "./browser-publisher";
+
+import { initLogs, log, getLogs, flushLogs, errorDetail } from "./run-logger";
 
 const primaryInstance = app.requestSingleInstanceLock();
 if (!primaryInstance) app.quit();
@@ -33,10 +35,35 @@ async function walkImages(folder: string, depth = 0): Promise<string[]> {
 }
 
 function registerIpc() {
-  ipcMain.handle("browser:open", (_event, platform: Platform) => openPlatformBrowser(platform));
-  ipcMain.handle("browser:publish", (_event, ids: string[]) => publishDrafts(ids));
-  ipcMain.handle("browser:resolve", (_event, id: string, published: boolean) => resolvePublish(id, published));
-  ipcMain.handle("images:import-files", async () => {
+  const handle = (channel: string, listener: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => any) => {
+    ipcMain.handle(channel, async (event, ...args) => {
+      const quiet = ["logs:list", "logs:renderer-error", "browser:settings", "images:list", "drafts:list", "settings:get", "clipboard:copy"].includes(channel);
+      if (!quiet) void log({ source: "app", level: "info", step: channel, message: "开始操作：" + channel });
+      try {
+        const result = await listener(event, ...args);
+        if (!quiet) void log({ source: "app", level: "info", step: `${channel}.done`, message: "操作完成：" + channel });
+        return result;
+      }
+      catch (error) {
+        if (channel !== "logs:list") void log({ source: "app", level: "error", step: channel, message: "操作失败：" + channel, detail: errorDetail(error) });
+        throw error;
+      }
+    });
+  };
+  handle("logs:list", () => getLogs());
+  handle("logs:renderer-error", (_event, message, detail) => log({ source: "app", level: "error", step: "renderer.error", message: String(message).slice(0, 2000), detail: typeof detail === "string" ? detail.slice(0, 6000) : undefined }));
+  handle("logs:folder", async () => {
+    const snapshot = await getLogs();
+    const error = await shell.openPath(snapshot.directory);
+    if (error) throw new Error(error);
+  });
+  handle("browser:settings", () => getBrowserSettings());
+  handle("browser:settings-save", (_event, settings) => saveBrowserSettings(settings));
+  handle("browser:close", (_event, platform: Platform) => closePlatformBrowser(platform));
+  handle("browser:open", (_event, platform: Platform) => openPlatformBrowser(platform));
+  handle("browser:publish", (_event, ids: string[]) => publishDrafts(ids));
+  handle("browser:resolve", (_event, id: string, published: boolean) => resolvePublish(id, published));
+  handle("images:import-files", async () => {
     const result = await dialog.showOpenDialog({
       title: "Select images",
       properties: ["openFile", "multiSelections"],
@@ -46,7 +73,7 @@ function registerIpc() {
     return importFiles(result.filePaths);
   });
 
-  ipcMain.handle("images:import-folder", async () => {
+  handle("images:import-folder", async () => {
     const result = await dialog.showOpenDialog({
       title: "Select image folder",
       properties: ["openDirectory"]
@@ -58,21 +85,21 @@ function registerIpc() {
     return importFiles(files);
   });
 
-  ipcMain.handle("images:list", () => listImages());
-  ipcMain.handle("images:delete", (_event, imageId: string) => deleteImage(imageId));
+  handle("images:list", () => listImages());
+  handle("images:delete", (_event, imageId: string) => deleteImage(imageId));
 
-  ipcMain.handle("drafts:create", (_event, imageIds: string[], platforms: Platform[]) => {
+  handle("drafts:create", (_event, imageIds: string[], platforms: Platform[]) => {
     const allowed = ["instagram", "x", "pinterest"];
     if (!Array.isArray(imageIds) || !Array.isArray(platforms) || platforms.some((p) => !allowed.includes(p))) {
       throw new Error("Invalid draft request");
     }
     return createDrafts(imageIds, platforms);
   });
-  ipcMain.handle("drafts:list", () => listDrafts());
-  ipcMain.handle("drafts:delete", (_event, id: string) => { assertNotPublishing(id); return deleteDraft(id); });
-  ipcMain.handle("drafts:update", (_event, id: string, patch) => { assertNotPublishing(id); return updateDraft(id, patch); });
-  ipcMain.handle("drafts:generate", (_event, id: string) => { assertNotPublishing(id); return generateCaption(id); });
-  ipcMain.handle("drafts:prepare", (_event, id: string) => { assertNotPublishing(id); return prepareDraft(id); });
+  handle("drafts:list", () => listDrafts());
+  handle("drafts:delete", (_event, id: string) => { assertNotPublishing(id); return deleteDraft(id); });
+  handle("drafts:update", (_event, id: string, patch) => { assertNotPublishing(id); return updateDraft(id, patch); });
+  handle("drafts:generate", (_event, id: string) => { assertNotPublishing(id); return generateCaption(id); });
+  handle("drafts:prepare", (_event, id: string) => { assertNotPublishing(id); return prepareDraft(id); });
 
   // Native file drag: the user initiates the drag from the app and drops files
   // into the platform composer. This does not automate the destination website.
@@ -99,14 +126,14 @@ function registerIpc() {
     if (icon.isEmpty()) return;
     event.sender.startDrag({ file: files[0], files, icon });
   });
-  ipcMain.handle("drafts:published", (_event, id: string, url?: string) => { assertNotPublishing(id); return markPublished(id, url); });
-  ipcMain.handle("drafts:schedule", (_event, id: string, date: string) => { assertNotPublishing(id); return scheduleDraft(id, date); });
+  handle("drafts:published", (_event, id: string, url?: string) => { assertNotPublishing(id); return markPublished(id, url); });
+  handle("drafts:schedule", (_event, id: string, date: string) => { assertNotPublishing(id); return scheduleDraft(id, date); });
 
-  ipcMain.handle("settings:get", () => getSettings());
-  ipcMain.handle("settings:save-key", (_event, key: string) => saveDeepSeekKey(key));
-  ipcMain.handle("settings:clear-key", () => clearDeepSeekKey());
+  handle("settings:get", () => getSettings());
+  handle("settings:save-key", (_event, key: string) => saveDeepSeekKey(key));
+  handle("settings:clear-key", () => clearDeepSeekKey());
 
-  ipcMain.handle("external:open", async (_event, url: string) => {
+  handle("external:open", async (_event, url: string) => {
     const parsed = new URL(url);
     const allowedHosts = new Set([
       "www.instagram.com",
@@ -121,7 +148,7 @@ function registerIpc() {
     }
     await shell.openExternal(url);
   });
-  ipcMain.handle("clipboard:copy", (_event, text: string) => {
+  handle("clipboard:copy", (_event, text: string) => {
     clipboard.writeText(String(text || "").slice(0, 10000));
     return true;
   });
@@ -172,6 +199,9 @@ function createWindow() {
     if (url.startsWith("https://")) void shell.openExternal(url);
     return { action: "deny" };
   });
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    void log({ source: "app", level: "error", step: "renderer.exited", message: `界面进程退出：${details.reason}，退出码 ${details.exitCode}` });
+  });
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -186,6 +216,7 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   if (!primaryInstance) return;
+  await initLogs();
   await initStore();
   await recoverPublishing();
   registerIpc();
@@ -198,9 +229,13 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("before-quit", () => {
-  stopPublisher();
+let closing = false;
+app.on("before-quit", event => {
+  if (closing) return;
+  event.preventDefault();
+  closing = true;
   if (reminderTimer) clearInterval(reminderTimer);
+  void stopPublisher().then(() => log({ source: "app", level: "info", step: "app.stop", message: "程序退出，正在保存日志" })).then(flushLogs).finally(() => app.quit());
 });
 
 app.on("window-all-closed", () => {

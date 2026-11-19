@@ -1,0 +1,55 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { pathToFileURL } from 'node:url';
+import ts from 'typescript';
+
+const root = await fs.mkdtemp(path.join(os.tmpdir(), 'fanzy-log-test-'));
+try {
+  const source = await fs.readFile('src/main/log-store.ts', 'utf8');
+  const compiled = ts.transpileModule(source, {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;
+  const modulePath = path.join(root,'log-store.mjs');
+  await fs.writeFile(modulePath,compiled);
+  const {LogStore} = await import(pathToFileURL(modulePath).href);
+  const observed = [];
+  const store = new LogStore(path.join(root,'normal'),entry=>observed.push(entry));
+  await store.init();
+  store.protect('sample-private-pairing-token');
+  await Promise.all(Array.from({length:30},(_,i)=>store.write({level:'info',source:'app',step:'test.'+i,message:'event '+i})));
+  await store.write({level:'error',source:'python',step:'failure',message:'sample-private-pairing-token token="secret-value" sk-key1234',detail:'Traceback\nAuthorization: Bearer sensitive\ncaption="private body"\nhttps://example.com/?token=secret'});
+  let snapshot = await store.snapshot();
+  assert.equal(snapshot.entries.length,31);
+  assert.equal(observed.length,31);
+  const raw=await fs.readFile(path.join(root,'normal/runtime.jsonl'),'utf8');
+  for(const secret of ['sample-private-pairing-token','secret-value','sk-key1234','sensitive','private body','token=secret']) assert.ok(!raw.includes(secret),secret);
+  assert.ok(raw.includes('Traceback'));
+  assert.deepEqual(raw.trim().split('\n').slice(0,30).map(line=>JSON.parse(line).message),Array.from({length:30},(_,i)=>'event '+i));
+  await fs.appendFile(path.join(root,'normal/runtime.jsonl'),'{"truncated":');
+  const restart = new LogStore(path.join(root,'normal'));
+  await restart.init();
+  assert.equal((await restart.snapshot()).entries.length,31);
+  await restart.write({source:'app',level:'info',step:'restart',message:'after restart'});
+  const third = new LogStore(path.join(root,'normal'));await third.init();
+  assert.equal((await third.snapshot()).entries.at(-1).message,'after restart');
+  const rotating = new LogStore(path.join(root,'rotated'),()=>{},700,2);await rotating.init();
+  for(let i=0;i<15;i++) await rotating.write({source:'app',level:'info',step:'rotate',message:'entry '+i+' '+'a'.repeat(60)});
+  const files=await fs.readdir(path.join(root,'rotated'));
+  assert.equal(files.length,3);
+  for(const file of files) assert.ok((await fs.stat(path.join(root,'rotated',file))).size<=700);
+  const recovered = new LogStore(path.join(root,'rotated'),()=>{},700,2);await recovered.init();
+  assert.equal((await recovered.snapshot()).entries.at(-1).message,'entry 14 '+'a'.repeat(60));
+  const brokenPath=path.join(root,'blocked');await fs.writeFile(brokenPath,'file');
+  const broken = new LogStore(brokenPath);await broken.init();
+  await broken.write({source:'app',level:'info',step:'memory',message:'retained in memory'});
+  assert.ok((await broken.snapshot()).storageError);
+  assert.ok((await broken.snapshot()).entries.some(e=>e.message==='retained in memory'));
+  await fs.unlink(brokenPath);
+  await broken.write({source:'app',level:'info',step:'recovered',message:'disk available'});
+  assert.equal((await broken.snapshot()).storageError,null);
+  console.log('PASS: log ordering, redaction, restart recovery, truncated-line recovery, rotation, memory fallback and disk recovery');
+} finally {
+  const resolved=path.resolve(root);
+  if(!resolved.startsWith(path.resolve(os.tmpdir())+path.sep)||!path.basename(resolved).startsWith('fanzy-log-test-')) throw Error('Unexpected temporary path');
+  await fs.rm(resolved,{recursive:true,force:true});
+}

@@ -60,8 +60,20 @@ export async function listDrafts() {
   return getStore().drafts;
 }
 
-export async function updateDraft(draftId: string, patch: Partial<Pick<Draft, "title" | "caption" | "altText" | "hashtags" | "boardName">>) {
+export async function updateDraft(draftId: string, patch: Partial<Pick<Draft, "title" | "caption" | "altText" | "hashtags" | "boardName" | "xScheduledAt">>) {
   const allowed: Partial<Draft> = {};
+  const existing = findDraft(draftId);
+  if (!existing) throw new Error("Draft not found");
+  if (existing.browserPublish?.state === "scheduled") throw new Error("该任务已提交到 X，请在 X 的已排程帖子中修改或取消");
+  if (patch.xScheduledAt !== undefined) {
+    if (["running", "uncertain", "succeeded"].includes(existing.browserPublish?.state || "") && patch.xScheduledAt !== existing.xScheduledAt) throw new Error("请先核对已有发布结果，再修改排程");
+    if (patch.xScheduledAt === null) allowed.xScheduledAt = null;
+    else {
+      const time = new Date(patch.xScheduledAt).getTime();
+      if (typeof patch.xScheduledAt !== "string" || existing.platform !== "x" || !Number.isFinite(time) || time < Date.now() + 300000) throw new Error("X 定时发布时间必须至少在 5 分钟以后");
+      allowed.xScheduledAt = new Date(time).toISOString();
+    }
+  }
   if (typeof patch.boardName === "string") allowed.boardName = patch.boardName.trim().slice(0, 200);
   if (typeof patch.title === "string") allowed.title = patch.title.slice(0, 200);
   if (typeof patch.caption === "string") allowed.caption = patch.caption.slice(0, 5000);

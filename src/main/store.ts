@@ -16,6 +16,8 @@ export interface StoreData {
   settings: {
     deepSeekKeyEncrypted?: string;
     model?: string;
+    showBrowser?: boolean;
+    browserChannel?: "msedge" | "chrome" | "chromium";
   };
 }
 

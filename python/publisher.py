@@ -1,74 +1,341 @@
-"""JSON-lines child process for Electron. Run with Python 3.10+.
-
-stdout is protocol only. Each platform gets an app-owned persistent profile.
-"""
+"""Persistent-profile Playwright worker. JSON lines are the stdout protocol."""
+import asyncio
+import base64
 import json
+import queue
 import sys
+import threading
+import traceback
+import uuid
 from pathlib import Path
-from adapters import URLS, prepare, submit, validate
+from urllib.parse import urlsplit
+from adapters import URLS, validate
+import session_store
+from native_login import NativeChrome
+
+ADAPTER_PATH = Path(__file__).with_name('page_adapter.js')
+CHANNELS = ('msedge', 'chrome', 'chromium')
+LOGIN_URLS = {
+    'x': 'https://x.com/i/flow/login',
+    'instagram': 'https://www.instagram.com/',
+    'pinterest': 'https://www.pinterest.com/',
+}
 
 
 def emit(value):
     print(json.dumps(value, ensure_ascii=True), flush=True)
 
 
-def main():
-    from playwright.sync_api import sync_playwright
-    root = Path(sys.argv[1]).resolve()
-    root.mkdir(parents=True, exist_ok=True)
-    contexts = {}
-    pages = {}
-    with sync_playwright() as playwright:
-        for line in sys.stdin:
-            request = json.loads(line)
-            submitted = False
+class Publisher:
+    def __init__(self, playwright, output=emit, context_setup=None, native_login_factory=None):
+        self.playwright = playwright
+        self.output = output
+        self.logins = {}
+        self.login_requests = {}
+        self.context_setup = context_setup
+        self.native_login_factory = native_login_factory or NativeChrome.start
+
+    def log(self, step, message, job=None, level='info', detail=None, source='python'):
+        entry = dict(type='log', source=source, step=step, message=message, level=level)
+        if job:
+            entry.update(draftId=job.get('id'), jobId=job.get('jobId'), platform=job.get('platform'))
+        if detail:
+            entry['detail'] = detail
+        self.output(entry)
+
+    def profile(self, request):
+        platform, channel = request.get('platform'), request.get('channel', 'chrome')
+        if platform not in URLS or channel not in CHANNELS:
+            raise ValueError('不支持的平台或浏览器')
+        return Path(request['profilesRoot']).resolve() / channel / platform
+
+    async def launch(self, request, visible=False, restore_session=True):
+        profile = self.profile(request)
+        if str(profile) in self.logins:
+            raise ValueError('该平台登录窗口仍打开，请先点击“完成登录 / 关闭窗口”保存登录状态')
+        profile.mkdir(parents=True, exist_ok=True)
+        self.log('browser.launch', '启动可见浏览器' if visible else '启动无头浏览器', request)
+        try:
+            context = await self.playwright.chromium.launch_persistent_context(
+                str(profile), channel=request.get('channel', 'chrome'), headless=not visible,
+                viewport={'width': 1440, 'height': 1000}, timeout=30000)
+        except Exception as error:
+            raise RuntimeError('浏览器启动失败。请确认所选浏览器已安装，且该平台的专用窗口已关闭。Chromium 需运行 python -m playwright install chromium。') from error
+        try:
+            if self.context_setup:
+                await self.context_setup(context, request)
+            state = session_store.load(profile) if restore_session else None
+            if state:
+                await context.set_storage_state(state)
+                self.log('session.restored', '已恢复加密保存的登录状态', request)
+            return context
+        except Exception as error:
+            await context.close()
+            raise RuntimeError('登录状态恢复失败，请使用保存配置的同一个 Windows 用户运行程序') from error
+
+    async def save_session(self, context, request):
+        state = await asyncio.wait_for(context.storage_state(indexed_db=True), timeout=10)
+        session_store.save(self.profile(request), state)
+
+    async def login(self, request):
+        if request.get('channel', 'chrome') != 'chrome':
+            raise ValueError('普通浏览器登录与发布请统一使用 Chrome')
+        profile = self.profile(request)
+        key = str(profile)
+        if key in self.logins:
+            raise ValueError('该平台已有登录会话，请先点击完成登录保存后再打开')
+        self.log('login.native_launch', '使用普通 Chrome 打开专用登录窗口（不启用 Playwright）', request)
+        window = await self.native_login_factory(profile, LOGIN_URLS[request['platform']])
+        self.logins[key] = window
+        self.login_requests[key] = request
+        self.log('login.open', '请在普通 Chrome 中登录；完成后点击程序中的“完成登录 / 关闭窗口”保存完整登录快照', request)
+        return {'state': 'opened'}
+
+    async def close_login(self, request):
+        key = str(self.profile(request))
+        window = self.logins.get(key)
+        if not window:
+            raise ValueError('没有待保存的登录窗口，请先点击该平台登录')
+        self.log('login.native_close', '正常关闭专用 Chrome，等待配置写入磁盘', request)
+        await window.close()
+        self.logins.pop(key)
+        context = None
+        try:
+            # Never overwrite the freshly logged-in native profile with an old snapshot.
+            context = await self.launch(request, restore_session=False)
+            page = context.pages[0] if context.pages else await context.new_page()
+            home = 'https://' + urlsplit(URLS[request['platform']]).netloc + '/'
+            await page.goto(home, wait_until='domcontentloaded', timeout=15000)
+            await self.save_session(context, request)
+        except Exception:
+            self.logins[key] = window  # Keep a retryable save operation, even after manual close.
+            raise
+        finally:
+            if context:
+                await context.close()
+        self.login_requests.pop(key, None)
+        self.log('login.saved', '窗口已关闭，配置已保存；实际登录有效性将在发布时检查', request)
+        return {'state': 'opened'}
+
+    async def open_instagram_composer(self, page, job, phase):
+        """Native actionable click + bounded effect checks; never retries publication."""
+        self.log('instagram.create.wait', '等待 Instagram 创建入口就绪、稳定且未被遮挡', job)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time()+35
+        attempts = 0
+        retry_at = 0
+        ready_since = None
+        while loop.time() < deadline:
+            state = await phase('instagram_open_state')
+            if state == 'open':
+                self.log('instagram.create.opened', f'已确认图片上传弹窗打开（创建点击 {attempts} 次），允许继续上传', job)
+                return
+            if state != 'ready':
+                ready_since = None
+                await asyncio.sleep(0.2)
+                continue
+            if loop.time() < retry_at:
+                await asyncio.sleep(0.2)
+                continue
+            if attempts >= 3:
+                break
+            # Presence alone does not mean hydration finished. Require a continuous
+            # ready interval, then Playwright checks visibility/stability/hit target.
+            if ready_since is None:
+                ready_since = loop.time()
+            if loop.time()-ready_since < 1:
+                await asyncio.sleep(0.2)
+                continue
+            control = page.locator('[data-fanzy-create="instagram"]')
             try:
-                platform = request["platform"]
-                if platform not in URLS:
-                    raise ValueError("Unsupported platform")
-                if request["action"] == "publish":
-                    validate(request)
-                context = contexts.get(platform)
-                if context is None:
-                    context = playwright.chromium.launch_persistent_context(
-                        str(root / platform), channel="msedge", headless=False,
-                        viewport={"width": 1280, "height": 900}, locale="en-US")
-                    contexts[platform] = context
-                    context.on("close", lambda *_, key=platform: contexts.pop(key, None))
-                    context.set_default_timeout(20000)
-                    context.set_default_navigation_timeout(45000)
-                page = pages.get(platform)
-                if page is None or page.is_closed():
-                    page = context.new_page()
-                    pages[platform] = page
-                page.bring_to_front()
-                if request["action"] == "login":
-                    page.goto(URLS[platform], wait_until="domcontentloaded")
-                    emit({"type": "result", "state": "opened"})
-                    continue
-                control, success = prepare(page, request)
-
-                def before_submit():
-                    nonlocal submitted
-                    emit({"type": "submitting"})
-                    ack = json.loads(sys.stdin.readline())
-                    if ack != {"ack": "persisted"}:
-                        raise RuntimeError("Publish checkpoint was not persisted")
-                    submitted = True
-
-                url = submit(page, control, success, before_submit)
-                emit({"type": "result", "state": "succeeded", "url": url,
-                      "message": "Platform displayed its publication confirmation."})
+                await control.click(trial=True, timeout=2000)
+            except Exception:
+                ready_since = None
+                await asyncio.sleep(0.2)
+                continue
+            if await phase('instagram_open_state') != 'ready':
+                ready_since = None
+                continue
+            attempts += 1
+            self.log('instagram.create.click', f'点击 Instagram 创建入口（{attempts}/3）', job)
+            try:
+                await control.click(timeout=2000)
             except Exception as error:
-                # Do not expose Playwright call logs, cookies, or caption content.
-                message = (str(error) if isinstance(error, ValueError) else
-                           "Browser step could not be verified. Check login, verification challenges, upload progress and page layout in the open browser.")
-                emit({"type": "result", "state": "uncertain" if submitted else "needs_attention", "message": message})
+                self.log('instagram.create.click_failed', '创建点击未完成，将先检查弹窗状态', job, 'warn', str(error))
+            retry_at = loop.time()+5
+            ready_since = None
+            self.log('instagram.create.confirm', '等待上传弹窗确认；至少 5 秒内不重复点击', job)
+        raise ValueError(f'Instagram 创建入口点击 {attempts} 次后仍未打开上传弹窗，已停止；未上传或发布。请查看失败截图，或打开可见浏览器检查页面加载/遮挡情况')
+
+    async def publish(self, request, checkpoint):
+        validate(request)
+        job = {**request, 'jobId': uuid.uuid4().hex, 'fileCount': len(request['files'])}
+        job.setdefault('id', job['jobId'])
+        job.setdefault('hashtags', [])
+        context = page = None
+        checkpoint_requested = False
+        self.log('job.start', '开始 Playwright 发布任务', job)
+        try:
+            async def execute():
+                nonlocal context, page, checkpoint_requested
+                context = await self.launch(job, visible=job.get('showBrowser') is True)
+                page = context.pages[0] if context.pages else await context.new_page()
+                page.on('pageerror', lambda error: self.log('page.error', '平台页面脚本异常', job, 'error', str(error)))
+                page.on('requestfailed', lambda req: self.log('network.failed', '网络请求失败：'+urlsplit(req.url).netloc, job, 'warn', req.failure))
+                async def trace(source, entry):
+                    self.log(str(entry.get('step', 'page.event')), str(entry.get('message', '')), job,
+                             entry.get('level', 'info'), entry.get('detail'), source='page')
+                await page.expose_binding('fanzyTrace', trace)
+                self.log('page.open', '打开平台发布页面', job)
+                await self.open_publish_page(page, job)
+                expected = urlsplit(URLS[job['platform']]).netloc
+                if urlsplit(page.url).netloc != expected or any(part in urlsplit(page.url).path for part in ('/login', '/accounts/login', '/challenge', '/checkpoint', '/i/flow')):
+                    raise ValueError('登录已失效或平台要求验证，请打开该平台登录窗口处理后重试')
+                # Capture a fresh adapter for each new job; never replace it mid-job.
+                await page.evaluate(ADAPTER_PATH.read_text(encoding='utf-8'))
+                async def phase(name, extra=None):
+                    return await page.evaluate('([phase,job,extra])=>globalThis.fanzyPublisher(phase,job,extra)', [name, job, extra])
+                await phase('begin')
+                if job['platform'] == 'instagram':
+                    await self.open_instagram_composer(page, job, phase)
+                for index, file in enumerate(request['files']):
+                    path = Path(file)
+                    self.log('asset.load', f'读取图片 {index+1}/{job["fileCount"]}', job)
+                    await phase('asset', {'name': path.name, 'type': 'image/jpeg', 'data': base64.b64encode(path.read_bytes()).decode('ascii')})
+                await phase('prepare')
+                checkpoint_requested = True
+                self.log('submit.checkpoint_requested', '等待桌面端保存提交检查点', job)
+                if not await checkpoint():
+                    raise ValueError('未获得持久化提交许可，已停止发布')
+                self.log('submit.checkpoint_saved', '提交检查点已保存', job)
+                await phase('submit')
+                return {'state': 'succeeded', 'message': ('X 已确认定时排程：'+job['xScheduledAt']+'。修改或取消请前往 X。') if job.get('xScheduledAt') else '平台已显示发布成功确认。'}
+            return await asyncio.wait_for(execute(), timeout=180)
+        except Exception as error:
+            message = str(error) or '发布任务超时，请检查网络、登录或平台页面'
+            self.log('task.failed', message, job, 'error', traceback.format_exc())
+            if page and not page.is_closed():
+                try:
+                    folder = Path(request['artifactsRoot']).resolve()
+                    folder.mkdir(parents=True, exist_ok=True)
+                    screenshot = folder / (job['jobId']+'.png')
+                    await page.screenshot(path=str(screenshot), timeout=5000)
+                    self.log('failure.screenshot', '失败截图已保存：'+str(screenshot), job, 'warn')
+                    for old in sorted(folder.glob('*.png'), key=lambda f: f.stat().st_mtime, reverse=True)[50:]:
+                        old.unlink()
+                except Exception as screenshot_error:
+                    self.log('failure.screenshot_failed', '无法保存失败截图', job, 'warn', str(screenshot_error))
+            return {'state': 'uncertain' if checkpoint_requested else 'needs_attention', 'message': message}
+        finally:
+            if context:
+                try:
+                    await self.save_session(context, job)
+                except Exception as error:
+                    self.log('session.save_failed', '登录状态快照保存失败', job, 'warn', str(error))
+                try:
+                    await context.close()
+                    self.log('browser.closed', '浏览器已关闭，登录配置已保存', job)
+                except Exception as error:
+                    self.log('browser.close_failed', str(error), job, 'warn')
+
+    async def open_publish_page(self, page, job):
+        """Report document failures without retrying or reaching submission."""
+        status = None
+        def response_received(response):
+            nonlocal status
+            if response.request.is_navigation_request() and response.frame == page.main_frame:
+                status = response.status
+                self.log('page.http', f'平台主页面响应：HTTP {status}', job,
+                         'warn' if status >= 400 else 'info')
+        page.on('response', response_received)
+        try:
+            response = await page.goto(URLS[job['platform']], wait_until='domcontentloaded', timeout=45000)
+            if response and response.status >= 400:
+                status = response.status
+                raise RuntimeError(f'HTTP {status}')
+        except Exception as error:
+            if status in (401, 403, 429):
+                raise ValueError(
+                    f'平台拒绝打开发布页面（HTTP {status}），尚未上传或发送。'
+                    '请在设置中打开该平台登录窗口，检查是否能正常访问并完成登录或验证；'
+                    '如可见窗口正常，可开启“显示浏览器”后重试。'
+                    '若窗口也无法访问，请先检查网络或平台限制。'
+                ) from error
+            raise
+        finally:
+            page.remove_listener('response', response_received)
+
+    async def close(self):
+        async def finish(request):
+            try:
+                await self.close_login(request)
+            except Exception as error:
+                self.log('session.save_failed', '退出时无法保存登录快照', request, 'error', str(error))
+        await asyncio.gather(*(finish(request) for request in list(self.login_requests.values())))
+        self.logins.clear()
 
 
-if __name__ == "__main__":
+async def main():
+    incoming = queue.Queue()
+    disconnected = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    def read():
+        try:
+            for line in sys.stdin:
+                incoming.put(json.loads(line))
+        finally:
+            incoming.put(None)
+            loop.call_soon_threadsafe(disconnected.set)
+    threading.Thread(target=read, daemon=True).start()
     try:
-        main()
+        from playwright.async_api import async_playwright
     except ImportError:
-        emit({"type": "fatal", "message": "Python Playwright is missing. Install python/requirements.txt using your configured Python interpreter."})
-        sys.exit(1)
+        emit({'type': 'fatal', 'message': '缺少 Playwright。请运行 python -m pip install -r python/requirements.txt'})
+        return
+    async with async_playwright() as playwright:
+        publisher = Publisher(playwright)
+        publisher.log('python.ready', 'Playwright 发布服务已启动')
+        try:
+            while True:
+                request = await asyncio.to_thread(incoming.get)
+                if request is None:
+                    break
+                try:
+                    action = request.get('action')
+                    if action == 'login':
+                        result = await publisher.login(request)
+                    elif action == 'close_login':
+                        result = await publisher.close_login(request)
+                    elif action == 'publish':
+                        async def checkpoint():
+                            emit({'type': 'submitting'})
+                            try:
+                                ack = await asyncio.to_thread(incoming.get, True, 20)
+                                if ack is None:
+                                    incoming.put(None)
+                                return ack == {'ack': 'persisted'}
+                            except queue.Empty:
+                                return False
+                        operation = asyncio.create_task(publisher.publish(request, checkpoint))
+                        shutdown = asyncio.create_task(disconnected.wait())
+                        done, _ = await asyncio.wait((operation, shutdown), return_when=asyncio.FIRST_COMPLETED)
+                        if shutdown in done:
+                            operation.cancel()
+                            await asyncio.gather(operation, return_exceptions=True)
+                            publisher.log('task.interrupted', '桌面应用已退出，发布操作已中止；若已提交请核对平台结果', request, 'warn')
+                            break
+                        shutdown.cancel()
+                        await asyncio.gather(shutdown, return_exceptions=True)
+                        result = await operation
+                    else:
+                        raise ValueError('未知浏览器操作')
+                    emit({'type': 'result', **result})
+                except Exception as error:
+                    publisher.log('request.failed', str(error), request, 'error', traceback.format_exc())
+                    emit({'type': 'result', 'state': 'needs_attention', 'message': str(error)})
+        finally:
+            await publisher.close()
+
+
+if __name__ == '__main__':
+    asyncio.run(main())

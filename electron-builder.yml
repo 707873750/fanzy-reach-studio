@@ -12,6 +12,7 @@ extraResources:
     to: python
     filter:
       - "*.py"
+      - "*.js"
       - "requirements.txt"
 asarUnpack:
   - "**/node_modules/sharp/**/*"

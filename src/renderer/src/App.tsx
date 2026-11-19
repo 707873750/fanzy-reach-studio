@@ -5,9 +5,11 @@ import {
   Instagram, LayoutDashboard, Link2, ListChecks, Loader2, Plus,
   Search, Send, Settings, Sparkles, Trash2, Upload, X, Twitter
 } from "lucide-react";
-import type { Draft, ImageAsset, Platform, SettingsView } from "../../shared/types";
+import type { BrowserSettings, Draft, ImageAsset, Platform, SettingsView } from "../../shared/types";
 
-type Page = "library" | "queue" | "settings";
+import RunLogs from "./RunLogs";
+
+type Page = "library" | "queue" | "settings" | "logs";
 const PLATFORM_META: Record<Platform, { label: string; url: string; icon: typeof Instagram; color: string }> = {
   instagram: { label: "Instagram", url: "https://www.instagram.com/", icon: Instagram, color: "#E879A6" },
   x: { label: "X", url: "https://x.com/compose/post", icon: Twitter, color: "#D8DEE9" },
@@ -15,6 +17,7 @@ const PLATFORM_META: Record<Platform, { label: string; url: string; icon: typeof
 };
 
 function App() {
+  const [logDraftId, setLogDraftId] = useState("");
   const [page, setPage] = useState<Page>("library");
   const [images, setImages] = useState<ImageAsset[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -33,14 +36,16 @@ function App() {
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
   const [checkedDrafts, setCheckedDrafts] = useState<string[]>([]);
+  const [xScheduleAt, setXScheduleAt] = useState("");
   const [boardName, setBoardName] = useState("");
-  const canPublish = (draft: Draft) => draft.status !== "published" && !["running", "uncertain", "succeeded"].includes(draft.browserPublish?.state || "");
-  const publishSelected = () => void runBusy("Publishing in browser… Keep this app and browser open.", async () => {
+  const [browserSettings, setBrowserSettings] = useState<BrowserSettings>({showBrowser:false,channel:"msedge"});
+  const canPublish = (draft: Draft) => draft.status !== "published" && !["running", "uncertain", "succeeded", "scheduled"].includes(draft.browserPublish?.state || "");
+  const publishSelected = () => void runBusy("Publishing with Playwright… Keep this app open.", async () => {
     if (selectedDraft && checkedDrafts.includes(selectedDraft.id)) {
-      await window.reach.updateDraft(selectedDraft.id, { caption, title, altText, boardName });
+      await window.reach.updateDraft(selectedDraft.id, { caption, title, altText, boardName, xScheduledAt: selectedDraft.platform === "x" && xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
     }
     const result = await window.reach.publishDrafts(checkedDrafts);
-    setNotice(`${result.filter((d) => d.status === "published").length}/${result.length} published. Review individual results before retrying.`);
+    setNotice(`${result.filter((d) => d.status === "published").length}/${result.length} published; ${result.filter((d) => d.browserPublish?.state === "scheduled").length} scheduled on X. Review individual results before retrying.`);
     setCheckedDrafts([]);
   });
 
@@ -50,14 +55,16 @@ function App() {
   ), [images, search]);
 
   async function refresh() {
-    const [nextImages, nextDrafts, nextSettings] = await Promise.all([
+    const [nextImages, nextDrafts, nextSettings, nextBrowserSettings] = await Promise.all([
       window.reach.listImages(),
       window.reach.listDrafts(),
-      window.reach.getSettings()
+      window.reach.getSettings(),
+      window.reach.getBrowserSettings()
     ]);
     setImages(nextImages);
     setDrafts(nextDrafts);
     setSettings(nextSettings);
+    setBrowserSettings(nextBrowserSettings);
   }
 
   useEffect(() => {
@@ -84,6 +91,8 @@ function App() {
     setTitle(selectedDraft.title);
     setAltText(selectedDraft.altText);
     setBoardName(selectedDraft.boardName || "");
+    const time = selectedDraft.xScheduledAt ? new Date(selectedDraft.xScheduledAt) : null;
+    setXScheduleAt(time ? new Date(time.getTime() - time.getTimezoneOffset()*60000).toISOString().slice(0,16) : "");
     setPublishedUrl(selectedDraft.publishedUrl || "");
   }, [selectedDraftId, selectedDraft?.updatedAt]);
 
@@ -122,7 +131,7 @@ function App() {
   const saveDraft = async () => {
     if (!selectedDraft) return;
     await runBusy("Saving draft…", async () => {
-      await window.reach.updateDraft(selectedDraft.id, { caption, title, altText, boardName });
+      await window.reach.updateDraft(selectedDraft.id, { caption, title, altText, boardName, xScheduledAt: selectedDraft.platform === "x" && xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
     });
   };
 
@@ -136,7 +145,7 @@ function App() {
   const prepare = () => {
     if (!selectedDraft) return;
     void runBusy("Preparing platform-ready images…", async () => {
-      await window.reach.updateDraft(selectedDraft.id, { caption, title, altText, boardName });
+      await window.reach.updateDraft(selectedDraft.id, { caption, title, altText, boardName, xScheduledAt: selectedDraft.platform === "x" && xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
       await window.reach.prepareDraft(selectedDraft.id);
       setNotice("Export folder opened and caption copied. Finish publishing on the official platform website.");
     });
@@ -183,6 +192,7 @@ function App() {
         <button className={`nav-item ${page === "settings" ? "active" : ""}`} onClick={() => setPage("settings")}>
           <Settings size={17}/> Settings & Accounts
         </button>
+        <button className={`nav-item ${page === "logs" ? "active" : ""}`} onClick={() => { setLogDraftId(""); setPage("logs"); }}><ListChecks size={17}/> 运行日志</button>
         <div className="sidebar-bottom">
           <div className="local-card">
             <div className="local-icon"><CheckCircle2 size={16}/></div>
@@ -194,7 +204,7 @@ function App() {
 
       <main className="main">
         <header className="topbar">
-          <div className="breadcrumbs">Workspace <span>/</span> {page === "library" ? "Image Library" : page === "queue" ? "Publishing Queue" : "Settings"}</div>
+          <div className="breadcrumbs">Workspace <span>/</span> {page === "library" ? "Image Library" : page === "queue" ? "Publishing Queue" : page === "logs" ? "运行日志" : "Settings"}</div>
           <div className="top-actions">
             <span className="online-dot"/> Local workspace
             <div className="avatar">FR</div>
@@ -205,6 +215,7 @@ function App() {
           {notice && <div className="notice"><CircleHelp size={16}/><span>{notice}</span><button onClick={() => setNotice("")}><X size={15}/></button></div>}
           {busy && <div className="busy-bar"><Loader2 className="spin" size={15}/>{busyText}</div>}
 
+          {page === "logs" && <RunLogs draftId={logDraftId}/> }
           {page === "library" && (
             <>
               <section className="page-heading">
@@ -269,12 +280,12 @@ function App() {
                 <button className="button secondary" onClick={() => void refresh()}><ChevronDown size={16}/> Refresh</button>
               </section>
               <section className="panel">
-                <h2>Browser publishing · Python</h2>
-                <p className="muted">First sign in from Settings. Publishing uploads content and clicks Publish for every selected draft. Login checks or page changes pause that platform. Review uncertain results before retrying.</p>
+                <h2>Python + Playwright publishing</h2>
+                <p className="muted">提交选中草稿：已设置时间的 X 草稿提交到 X 排程，其余草稿立即发布。登录检查或页面变化会暂停该平台；结果不确定时请先核对再重试。</p>
                 <div className="heading-actions">
                   <button className="button secondary" disabled={busy} onClick={() => setCheckedDrafts(drafts.filter(canPublish).slice(0, 100).map((d) => d.id))}>Select eligible drafts (max 100)</button>
                   <button className="button secondary" disabled={busy} onClick={() => setCheckedDrafts([])}>Clear selection</button>
-                  <button className="button primary" disabled={busy || !checkedDrafts.length} onClick={publishSelected}><Send size={16}/> Publish {checkedDrafts.length} selected now</button>
+                  <button className="button primary" disabled={busy || !checkedDrafts.length} onClick={publishSelected}><Send size={16}/> Submit {checkedDrafts.length} selected</button>
                 </div>
               </section>
               <div className="queue-layout">
@@ -299,13 +310,18 @@ function App() {
                         <div><div className="eyebrow">PLATFORM DRAFT</div><h2>{PLATFORM_META[selectedDraft.platform].label}</h2><p>{selectedDraft.imageIds.length} image(s) · {selectedDraft.status}</p></div>
                         <button className="icon-button danger" disabled={busy} title="Delete draft" onClick={() => void runBusy("Deleting draft…", async () => { await window.reach.deleteDraft(selectedDraft.id); setCheckedDrafts((old) => old.filter((id) => id !== selectedDraft.id)); setSelectedDraftId(null); })}><Trash2 size={17}/></button>
                       </div>
-                      {selectedDraft.browserPublish && <div className="published-box"><strong>{selectedDraft.browserPublish.state}</strong><p className="muted">{selectedDraft.browserPublish.message}</p>
+                      {selectedDraft.browserPublish && <div className="published-box"><strong>{selectedDraft.browserPublish.state}</strong><button className="text-button" onClick={() => { setLogDraftId(selectedDraft.id); setPage("logs"); }}>查看该任务日志</button><p className="muted">{selectedDraft.browserPublish.message}</p>
                         {selectedDraft.browserPublish.state === "uncertain" && <div className="detail-actions">
-                          <button className="button success" disabled={busy} onClick={() => void runBusy("Saving review…", () => window.reach.resolvePublish(selectedDraft.id, true))}>I verified: published</button>
-                          <button className="button secondary" disabled={busy} onClick={() => void runBusy("Saving review…", () => window.reach.resolvePublish(selectedDraft.id, false))}>I verified: not published — allow retry</button>
+                          <button className="button success" disabled={busy} onClick={() => void runBusy("Saving review…", () => window.reach.resolvePublish(selectedDraft.id, true))}>{selectedDraft.xScheduledAt ? "已在 X 确认排程存在" : "I verified: published"}</button>
+                          <button className="button secondary" disabled={busy} onClick={() => void runBusy("Saving review…", () => window.reach.resolvePublish(selectedDraft.id, false))}>{selectedDraft.xScheduledAt ? "已确认 X 中无此排程 — 允许重试" : "I verified: not published — allow retry"}</button>
                         </div>}
                       </div>}
                       {selectedDraft.platform === "pinterest" && <div className="field"><label>Pinterest board name (exact match, required)</label><input disabled={busy} value={boardName} onChange={(e) => setBoardName(e.target.value)}/></div>}
+                      {selectedDraft.platform === "x" && <div className="field">
+                        <label htmlFor="x-schedule">X 定时发布时间（{Intl.DateTimeFormat().resolvedOptions().timeZone}）</label>
+                        <input id="x-schedule" type="datetime-local" disabled={busy || !canPublish(selectedDraft)} value={xScheduleAt} onChange={e=>setXScheduleAt(e.target.value)}/>
+                        <p className="muted">留空立即发布。选择至少 5 分钟后的时间，保存并提交草稿后，由 X 原生排程；收到排程确认后无需保持本程序运行。修改或取消已提交排程请前往 X。</p>
+                      </div>}
                       <div
                         className={`native-drag-zone ${selectedDraft.preparedFolder ? "is-ready" : ""}`}
                         draggable={Boolean(selectedDraft.preparedFolder)}
@@ -371,9 +387,16 @@ function App() {
             <>
               <section className="page-heading"><div><div className="eyebrow">PREFERENCES</div><h1>Settings & Accounts</h1><p>Connect an AI provider for image understanding and caption generation.</p></div></section>
               <section className="panel settings-panel">
-                <h2>Platform browsers</h2>
-                <p className="muted">Requires Python, Playwright and Microsoft Edge. Sign in manually in each dedicated browser. Profiles stay on this PC; your normal browser profile is not used. Platform page changes may require adapter updates.</p>
-                <div className="heading-actions">{(["instagram", "x", "pinterest"] as Platform[]).map((platform) => <button key={platform} className="button secondary" disabled={busy} onClick={() => void runBusy("Opening browser…", async () => { await window.reach.openPlatformBrowser(platform); setNotice("Sign in in the opened browser, then return to the publishing queue."); })}>Sign in / inspect {PLATFORM_META[platform].label}</button>)}</div>
+                <h2>Python + Playwright 浏览器发布</h2>
+                <p className="muted">三个平台均使用普通 Google Chrome 的独立窗口登录。完成后点击“完成登录 / 关闭窗口”，程序关闭窗口并加密保存登录状态，再由 Playwright 复用同一配置发布，默认无头运行。</p>
+                <div className="field"><label>登录与发布浏览器</label><p>Google Chrome（需已安装）</p></div>
+                <label><input type="checkbox" disabled={busy} checked={browserSettings.showBrowser} onChange={e=>void runBusy("Saving browser settings…",async()=>{setBrowserSettings(await window.reach.saveBrowserSettings({...browserSettings,showBrowser:e.target.checked}));})}/> 显示浏览器（发布时打开可见窗口）</label>
+                <p className="muted">登录始终使用可见的普通 Chrome；上方开关仅控制发布窗口。各平台配置独立，不影响日常 Chrome。旧 Edge / Chromium 配置保留，但需在 Chrome 中重新登录。保存登录不代表平台允许发布。</p>
+                {(["instagram","x","pinterest"] as Platform[]).map(platform=><div className="settings-actions" key={platform}>
+                  <button className="button secondary" disabled={busy} onClick={()=>void runBusy("Opening login browser…",()=>window.reach.openPlatformBrowser(platform))}>登录 {PLATFORM_META[platform].label}</button>
+                  <button className="button secondary" disabled={busy} onClick={()=>void runBusy("Saving browser profile…",async()=>{await window.reach.closePlatformBrowser(platform);setNotice("窗口已关闭，浏览器配置已保存。发布时将检查登录是否有效。");})}>完成 {PLATFORM_META[platform].label} 登录 / 关闭窗口</button>
+                </div>)}
+                <p className="muted">失败截图保存在日志目录的 screenshots 子目录，最多保留 50 张；可能包含账号和草稿内容。可在运行日志中查看路径并打开日志文件夹。</p>
               </section>
               <section className="panel settings-panel">
                 <div className="settings-title"><div className="provider-mark"><Sparkles/></div><div><h2>DeepSeek Vision</h2><p>Analyze local images and generate platform-specific English copy.</p></div></div>
@@ -385,7 +408,7 @@ function App() {
                 <div className="key-status"><span className={`status-dot ${settings.hasDeepSeekKey ? "published" : "draft"}`}/>{settings.hasDeepSeekKey ? "DeepSeek API key is configured" : "AI is optional. You can still create and edit drafts manually."}</div>
                 <a href="https://platform.deepseek.com/" onClick={(e) => { e.preventDefault(); void window.reach.openExternal("https://platform.deepseek.com/"); }}>Get a DeepSeek API key <ArrowUpRight size={14}/></a>
               </section>
-              <section className="panel"><h2>Privacy</h2><p className="muted">Images, drafts and exports are stored locally. When you generate AI captions, selected images are sent to DeepSeek. Browser publishing uploads content to selected platforms. Login sessions are stored in dedicated local browser profiles.</p></section>
+              <section className="panel"><h2>Privacy</h2><p className="muted">Images, drafts and exports are stored locally. When you generate AI captions, selected images are sent to DeepSeek. Browser publishing uploads content to selected platforms. Publishing uses dedicated local browser profiles saved on this computer.</p></section>
             </>
           )}
         </div>

@@ -1,1 +1,2 @@
-playwright>=1.51,<2
+# Required for production publishing and isolated browser tests.
+playwright==1.65.2

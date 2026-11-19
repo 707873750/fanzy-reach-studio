@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Fanzy Reach Publisher",
+  "version": "0.3.2",
+  "description": "Publish reviewed Fanzy Reach drafts using this browser's existing platform sessions.",
+  "minimum_chrome_version": "120",
+  "permissions": ["storage", "scripting", "alarms"],
+  "host_permissions": ["http://127.0.0.1/*", "https://x.com/*", "https://www.instagram.com/*", "https://www.pinterest.com/*"],
+  "background": {"service_worker": "background.js"},
+  "action": {"default_popup": "popup.html", "default_title": "Fanzy Reach"}
+}
