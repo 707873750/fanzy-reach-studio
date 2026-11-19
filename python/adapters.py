@@ -12,6 +12,8 @@ def validate(job):
     if not 1 <= len(files) <= limit or any(not Path(f).is_file() for f in files):
         raise ValueError("Missing images or invalid image count")
     if platform == "tiktok":
+        if job.get('tiktokPrivacy') not in (None, 'public', 'self_only'):
+            raise ValueError('无效的 TikTok 隐私设置')
         if len(job.get("title", "").encode("utf-16-le")) // 2 > 90:
             raise ValueError("TikTok 图片标题最多 90 字符")
         description = "\n\n".join(part for part in [job.get("caption", ""), " ".join(job.get("hashtags", []))] if part)

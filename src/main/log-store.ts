@@ -24,7 +24,7 @@ export class LogStore {
       .replace(/(https?:\/\/[^\s?"']+)\?[^\s"']*/gi, "$1?[REDACTED]")
       .replace(/[A-Za-z0-9+/=_-]{100,}/g, "[LONG DATA REDACTED]").slice(0, 6000);
   }
-  async init() {
+  async init(include: (entry: RunLog) => boolean = () => true) {
     try {
       await fs.mkdir(this.directory, { recursive: true });
       const history: RunLog[] = [];
@@ -36,6 +36,7 @@ export class LogStore {
           for (const line of raw.split("\n")) {
             try {
               const entry = JSON.parse(line);
+              if (!include(entry)) continue;
               if (typeof entry.id === "string" && typeof entry.time === "string" && Number.isFinite(Date.parse(entry.time)) && typeof entry.message === "string" && typeof entry.step === "string" && typeof entry.sessionId === "string" && ["info", "warn", "error"].includes(entry.level) && ["app", "python", "extension", "page"].includes(entry.source) && [entry.draftId, entry.jobId, entry.detail].every(value => value === undefined || typeof value === "string")) parsed.push(entry);
             } catch { /* tolerate a truncated last line */ }
           }

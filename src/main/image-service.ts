@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import sharp from "sharp";
 import { getAppPaths, getStore, persistStore, type StoredImage } from "./store";
+import { isPublishRecord } from "../shared/draft-lifecycle";
 
 const ALLOWED = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"]);
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
@@ -97,13 +98,13 @@ export async function deleteImage(imageId: string) {
   const store = getStore();
   const image = store.images.find((item) => item.id === imageId);
   if (!image) return;
-  if (store.drafts.some((draft) => draft.imageIds.includes(imageId) && draft.status !== "published")) {
-    throw new Error("图片正被草稿使用，请先删除或完成相关草稿。");
+  if (store.drafts.some((draft) => draft.imageIds.includes(imageId) && !isPublishRecord(draft))) {
+    throw new Error("图片仍被未完成的草稿使用，请先删除或完成相关草稿；发布记录不会阻止删除素材。");
   }
-  store.images = store.images.filter((item) => item.id !== imageId);
   await Promise.all([
     fs.rm(image.originalPath, { force: true }),
     fs.rm(image.thumbnailPath, { force: true })
   ]);
+  store.images = store.images.filter((item) => item.id !== imageId);
   await persistStore();
 }

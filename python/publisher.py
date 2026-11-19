@@ -14,6 +14,7 @@ import session_store
 from native_login import NativeChrome
 from performance_stats import system_sample
 from pinterest_confirmation import PinterestConfirmation
+from tiktok_confirmation import TikTokConfirmation
 
 ADAPTER_PATH = Path(__file__).with_name('page_adapter.js')
 CHANNELS = ('msedge', 'chrome', 'chromium')
@@ -201,6 +202,8 @@ class Publisher:
                 page = context.pages[0] if context.pages else await context.new_page()
                 if job['platform'] == 'pinterest':
                     confirmation = PinterestConfirmation(page)
+                elif job['platform'] == 'tiktok':
+                    confirmation = TikTokConfirmation(page, lambda detail: self.log('tiktok.confirmation_response', '本次提交后的响应结构（不记录正文、凭据或查询参数）', job, detail=detail))
                 monitor = asyncio.create_task(self.monitor_page(page, job))
                 page.on('pageerror', lambda error: self.log('page.error', '平台页面脚本异常', job, 'error', str(error)))
                 page.on('requestfailed', lambda req: self.log('network.failed', '网络请求失败：'+urlsplit(req.url).netloc, job, 'warn', req.failure))
@@ -210,6 +213,26 @@ class Publisher:
                     self.log(str(entry.get('step', 'page.event')), str(entry.get('message', '')), job,
                              entry.get('level', 'info'), entry.get('detail'), source='page')
                 await page.expose_binding('fanzyTrace', trace)
+                if job['platform'] == 'tiktok':
+                    async def type_tiktok(source, field):
+                        if source['frame'] != page.main_frame or checkpoint_requested or field not in ('title', 'description'):
+                            raise ValueError('Invalid TikTok input phase')
+                        text = job.get('title', '') if field == 'title' else '\n\n'.join(part for part in [job.get('caption', ''), ' '.join(job['hashtags'])] if part)
+                        control = page.locator('[data-fanzy-native-field="'+field+'"]')
+                        if await control.count() != 1:
+                            raise ValueError('TikTok 输入框已变化')
+                        self.log('tiktok.native_input', '使用浏览器原生输入填写 '+field+'（不记录正文）', job)
+                        await control.click()
+                        await control.press('ControlOrMeta+A')
+                        if text:
+                            for index, line in enumerate(text.replace('\r\n', '\n').split('\n')):
+                                if index:
+                                    await page.keyboard.press('Shift+Enter')
+                                if line:
+                                    await page.keyboard.insert_text(line)
+                        else:
+                            await control.press('Backspace')
+                    await page.expose_binding('fanzyTikTokInput', type_tiktok)
                 self.log('page.open', '打开平台发布页面', job)
                 await self.open_publish_page(page, job)
                 expected = urlsplit(URLS[job['platform']]).netloc
@@ -233,15 +256,21 @@ class Publisher:
                     raise ValueError('未获得持久化提交许可，已停止发布')
                 self.log('submit.checkpoint_saved', '提交检查点已保存', job)
                 result = await phase('submit')
+                if confirmation and getattr(confirmation, 'confirmed', False):
+                    self.log('submit.success', 'TikTok 本次发布接口已确认接收提交', job)
+                    return {'state':'succeeded','message':'TikTok 已确认接收作品；审核状态与可见范围请以平台为准。'}
                 if confirmation and confirmation.url:
                     return {'state':'succeeded','message':'Pinterest 已确认创建 Pin。','url':confirmation.url}
                 if result and result.get('state') == 'uncertain':
                     self.log('task.uncertain', '已提交，结果待确认', job, 'warn')
                     await self.capture_result(page, request, job, pending=True)
                     return {'state':'uncertain','message':'已提交，结果待确认'}
-                return {'state': 'succeeded', 'message': ('X 已确认定时排程：'+job['xScheduledAt']+'。修改或取消请前往 X。') if job.get('xScheduledAt') else '平台已显示发布成功确认。'}
+                return {'state': 'succeeded', 'message': ('X 已确认定时排程：'+job['xScheduledAt']+'。修改或取消请前往 X。') if job.get('xScheduledAt') else ('TikTok 已确认提交作品；审核状态与可见范围请以平台为准。' if job['platform']=='tiktok' else '平台已显示发布成功确认。')}
             return await asyncio.wait_for(execute(), timeout=180)
         except Exception as error:
+            if confirmation and getattr(confirmation, 'confirmed', False):
+                self.log('submit.success', 'TikTok 本次发布接口已确认接收提交', job)
+                return {'state':'succeeded','message':'TikTok 已确认接收作品；审核状态与可见范围请以平台为准。'}
             if confirmation and confirmation.url:
                 self.log('submit.success','Pinterest 已返回本次创建的 Pin 链接',job)
                 return {'state':'succeeded','message':'Pinterest 已确认创建 Pin。','url':confirmation.url}

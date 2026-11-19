@@ -47,6 +47,14 @@ button { cursor: pointer; }
 .button.secondary { background: #22232c; border-color: #343541; color: #d1d1dc; }
 .button.secondary:hover { background: #2a2b36; }
 .button.success { background: #1e664b; color: #e1fff2; }
+.button.danger { background: #48262e; border-color: #79404b; color: #ffb1bc; }
+.button.danger:hover:not(:disabled) { background: #5c2c38; }
+.draft-bulk-actions { display: flex; flex-wrap: wrap; gap: 12px; padding: 0 7px 15px; }
+.text-button:disabled { opacity: .45; cursor: not-allowed; }
+.delete-confirm { padding: 12px; margin-bottom: 12px; border: 1px solid #79404b; border-radius: 8px; background: #302128; }
+.delete-confirm p { margin: 0 0 12px; font-size: 11px; line-height: 1.7; }
+.record-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; }
+.record-link { text-decoration: none; max-width: 100%; }
 .button.small { min-height: 32px; padding: 0 11px; }
 .stats-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 13px; margin-bottom: 18px; }
 .stat-card { border: 1px solid #2b2c36; border-radius: 11px; background: #191a22; padding: 15px 17px; }
@@ -63,6 +71,9 @@ button { cursor: pointer; }
 .empty-state h3 { margin: 14px 0 5px; font: 700 14px "Segoe UI",sans-serif; }
 .empty-state p { margin: 0 0 15px; color: #858796; font-size: 11px; }
 .image-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(145px,1fr)); gap: 12px; }
+.library-actions { align-items: center; margin-bottom: 16px; }
+.delete-file-list { max-height: 120px; overflow: auto; padding-left: 22px; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.image-card:disabled { cursor: not-allowed; opacity: .6; }
 .image-card { padding: 0; overflow: hidden; border: 1px solid #30313c; border-radius: 9px; background: #20212a; color: #ddd; text-align: left; }
 .image-card.selected { border-color: #8c78ff; box-shadow: 0 0 0 1px #8c78ff55; }
 .image-thumb { position: relative; aspect-ratio: 1 / 1; background: #252631; }

@@ -1,6 +1,7 @@
 export type Platform = "instagram" | "x" | "pinterest" | "tiktok";
 export interface PlatformDefaults {
   imagesPerDraft: number;
+  tiktokPrivacy?: "public" | "self_only";
   hashtags: string[];
   boardName: string;
   title: string;
@@ -11,7 +12,7 @@ export interface CopyOptions {
   sharedCaption: string;
   platforms: Partial<Record<Platform, { mode: "shared" | "independent"; caption: string }>>;
 }
-export type DraftPatch = Partial<Pick<Draft, "title" | "caption" | "altText" | "hashtags" | "boardName" | "xScheduledAt" | "captionMode">>;
+export type DraftPatch = Partial<Pick<Draft, "title" | "caption" | "altText" | "hashtags" | "boardName" | "xScheduledAt" | "captionMode" | "tiktokPrivacy">>;
 export interface BrowserSettings { showBrowser: boolean; channel: "msedge" | "chrome" | "chromium"; }
 export interface RunLog {
   id: string;
@@ -60,6 +61,7 @@ export interface Draft {
   createdAt: string;
   updatedAt: string;
   boardName?: string;
+  tiktokPrivacy?: "public" | "self_only";
   xScheduledAt?: string | null;
   browserPublish?: { state: "running" | "needs_attention" | "uncertain" | "succeeded" | "scheduled"; message: string; submittedAt?: string };
 }
@@ -102,6 +104,8 @@ export interface ReachApi {
   createDrafts: (imageIds: string[], platforms: Platform[], copy?: CopyOptions) => Promise<Draft[]>;
   listDrafts: () => Promise<Draft[]>;
   deleteDraft: (draftId: string) => Promise<void>;
+  deleteDrafts: (draftIds: string[]) => Promise<number>;
+  deletePublishRecords: (recordIds: string[]) => Promise<number>;
   updateDraft: (draftId: string, patch: DraftPatch) => Promise<Draft>;
   generateCaption: (draftId: string) => Promise<Draft>;
   getSettings: () => Promise<SettingsView>;

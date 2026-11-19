@@ -91,7 +91,7 @@ export default function RunLogs({ draftId = "" }: { draftId?: string }) {
       </div>
       <p className="muted">当前匹配 {filtered.length} 条 · 时间使用本机时区 · 点击记录下方的详情查看错误堆栈和任务标识</p>
       <div className="heading-actions"><button className="button secondary" disabled={currentPage===0} onClick={()=>setPageIndex(currentPage-1)}>较新记录</button><span className="muted">第 {currentPage+1} / {pageCount} 页</span><button className="button secondary" disabled={currentPage+1>=pageCount} onClick={()=>setPageIndex(currentPage+1)}>较早记录</button></div>
-      <p className="muted">卡顿排查可搜索 performance.ui（界面）、performance.desktop（主进程与 GPU 进程）、performance.sample（发布页面与系统 GPU）。帧间隔偏高不等于显卡故障；最小化或切换窗口的样本需排除。</p>
+      <p className="muted">性能采样单独保存在日志文件夹的 performance 子目录，不在此列表刷屏。点击“打开日志文件夹”后进入该目录查看。窗口无响应、GPU 退出等异常仍显示在运行日志中。</p>
       <div className="log-list" aria-label="运行日志列表">
         {!filtered.length && <div className="empty-mini">{loading ? "正在读取…" : "没有匹配的日志。新操作产生的日志会自动出现。"}</div>}
         {visibleEntries.map(entry => <LogRow key={entry.id} entry={entry}/>)}

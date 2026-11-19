@@ -4,7 +4,7 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import { initStore, getStore, persistStore, getAppPaths, findDraft } from "./store";
 import { importFiles, listImages, deleteImage } from "./image-service";
-import { createDrafts, listDrafts, deleteDraft, updateDraft, prepareDraft, markPublished, scheduleDraft } from "./draft-service";
+import { createDrafts, listDrafts, deleteDraft, deleteDrafts, deletePublishRecords, updateDraft, prepareDraft, markPublished, scheduleDraft } from "./draft-service";
 import { generateCaption, saveDeepSeekKey, clearDeepSeekKey, getSettings } from "./ai-service";
 import type { CopyOptions, Platform } from "../shared/types";
 import { assertNotPublishing, getBrowserSettings, saveBrowserSettings, closePlatformBrowser, openPlatformBrowser, publishDrafts, resolvePublish, recoverPublishing, stopPublisher } from "./browser-publisher";
@@ -99,7 +99,17 @@ function registerIpc() {
     return createDrafts(imageIds, platforms, copy);
   });
   handle("drafts:list", () => listDrafts());
+  handle("history:delete", (_event, ids: string[]) => {
+    if (!Array.isArray(ids) || ids.some(id => typeof id !== "string")) throw new Error("无效的发布记录请求");
+    ids.forEach(id => assertNotPublishing(id));
+    return deletePublishRecords(ids);
+  });
   handle("drafts:delete", (_event, id: string) => { assertNotPublishing(id); return deleteDraft(id); });
+  handle("drafts:delete-many", (_event, ids: string[]) => {
+    if (!Array.isArray(ids) || ids.some(id => typeof id !== "string")) throw new Error("无效的草稿请求");
+    ids.forEach(id => assertNotPublishing(id));
+    return deleteDrafts(ids);
+  });
   handle("drafts:update", (_event, id: string, patch) => {
     assertNotPublishing(id);
     const group = findDraft(id)?.copyGroupId;

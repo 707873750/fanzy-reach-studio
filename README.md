@@ -219,3 +219,11 @@ Use the app's own UI to manage data. Do not manually edit `reach-data.json` whil
 - 本次没有接入 TikTok Content Posting API；该 API 的图片发布要求 OAuth 授权和经验证的公网图片 URL：https://developers.tiktok.com/docs/en/content-posting-api-reference-photo-post 。
 
 验证：`.venv\Scripts\python.exe -m unittest discover -s python -p test_tiktok.py`
+
+## 跨平台并行发布
+
+批量勾选不同平台的草稿后，TikTok、Instagram、X、Pinterest 各自使用独立 Python 工作进程及浏览器配置，并行上传与发布（最多四个平台）。同一平台的多条草稿按所选顺序逐条执行。
+
+提交检查点、超时和结果分别归属各平台进程；某平台失败或结果待确认仅暂停该平台的后续任务。整个批次完成前仍锁定所选草稿并禁止启动另一个批次。退出时会关闭全部平台工作进程。
+
+验证：`node tests/parallel-publisher.test.mjs`（模拟进程协议，不发布真实内容）。

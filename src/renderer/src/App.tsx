@@ -8,11 +8,13 @@ import {
 import type { BrowserSettings, Draft, ImageAsset, Platform, SettingsView } from "../../shared/types";
 import type { CopyOptions } from "../../shared/types";
 import { canEditCopy } from "../../shared/draft-copy";
+import { canDeleteDraft, isPublishRecord } from "../../shared/draft-lifecycle";
 
 import RunLogs from "./RunLogs";
 import PlatformSettings from "./PlatformSettings";
+import PublishHistory from "./PublishHistory";
 
-type Page = "library" | "queue" | "settings" | "logs";
+type Page = "library" | "queue" | "history" | "settings" | "logs";
 const STATUS_LABEL: Record<string, string> = {draft:"草稿",ready:"待发布",scheduled:"已定时",prepared:"素材已准备",published:"已发布",reminder_due:"提醒已到期",platform_scheduled:"平台已排程",running:"正在发布",needs_attention:"需要处理",uncertain:"已提交，结果待确认",succeeded:"发布成功"};
 const PLATFORM_META: Record<Platform, { label: string; url: string; icon: typeof Instagram; color: string }> = {
   instagram: { label: "Instagram", url: "https://www.instagram.com/", icon: Instagram, color: "#E879A6" },
@@ -27,6 +29,7 @@ function App() {
   const [images, setImages] = useState<ImageAsset[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [pendingImageDeleteIds, setPendingImageDeleteIds] = useState<string[] | null>(null);
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
   const [platforms, setPlatforms] = useState<Platform[]>(["instagram", "x", "pinterest", "tiktok"]);
   const [copyOptions, setCopyOptions] = useState<CopyOptions>({sharedCaption:"", platforms:{instagram:{mode:"shared",caption:""},x:{mode:"shared",caption:""},pinterest:{mode:"shared",caption:""},tiktok:{mode:"shared",caption:""}}});
@@ -46,19 +49,21 @@ function App() {
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
   const [checkedDrafts, setCheckedDrafts] = useState<string[]>([]);
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
   const [xScheduleAt, setXScheduleAt] = useState("");
+  const [tiktokPrivacy, setTikTokPrivacy] = useState<"public" | "self_only">("self_only");
   const [boardName, setBoardName] = useState("");
   const [browserSettings, setBrowserSettings] = useState<BrowserSettings>({showBrowser:false,channel:"chrome"});
-  const canPublish = (draft: Draft) => draft.status !== "published" && !["running", "uncertain", "succeeded", "scheduled"].includes(draft.browserPublish?.state || "");
+  const canPublish = canEditCopy;
   const publishSelected = async () => {
-    if (publishingRef.current || busy || !checkedDrafts.length) return;
-    const ids = [...checkedDrafts];
+    if (publishingRef.current || busy || !canSubmitSelection) return;
+    const ids = selectedDrafts.map(draft => draft.id);
     publishingRef.current = true;
     setPublishingIds(ids);
     setNotice("");
     try {
-    if (selectedDraft && checkedDrafts.includes(selectedDraft.id)) {
-      await window.reach.updateDraft(selectedDraft.id, { caption, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, xScheduledAt: selectedDraft.platform === "x" && xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
+    if (selectedDraft && ids.includes(selectedDraft.id)) {
+      await window.reach.updateDraft(selectedDraft.id, { caption, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, xScheduledAt: selectedDraft.platform === "x" && xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
     }
     const result = await window.reach.publishDrafts(ids);
     setNotice(`已发布 ${result.filter((d) => d.status === "published").length}/${result.length} 条；X 已排程 ${result.filter((d) => d.browserPublish?.state === "scheduled").length} 条。重试前请核对各任务结果。`);
@@ -73,11 +78,16 @@ function App() {
     }
   };
 
-  const selectedDraft = drafts.find((draft) => draft.id === selectedDraftId) || null;
+  const queueDrafts = useMemo(() => drafts.filter(draft => !isPublishRecord(draft)), [drafts]);
+  const publishRecords = useMemo(() => drafts.filter(isPublishRecord).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), [drafts]);
+  const selectedDraft = queueDrafts.find((draft) => draft.id === selectedDraftId) || null;
   const lockedGroups = new Set(drafts.filter(d => publishingIds.includes(d.id)).map(d => d.copyGroupId).filter(Boolean));
   const draftLocked = (draft: Draft) => publishingIds.includes(draft.id) || Boolean(draft.copyGroupId && lockedGroups.has(draft.copyGroupId));
   const detailBusy = busy || Boolean(selectedDraft && draftLocked(selectedDraft));
   const browserBusy = busy || publishing;
+  const selectedDrafts = queueDrafts.filter(draft => checkedDrafts.includes(draft.id));
+  const canSubmitSelection = selectedDrafts.length > 0 && selectedDrafts.length <= 100 && selectedDrafts.every(draft => canPublish(draft) && !draftLocked(draft));
+  const canDeleteSelection = selectedDrafts.length > 0 && selectedDrafts.every(draft => canDeleteDraft(draft) && !draftLocked(draft));
   const filteredImages = useMemo(() => images.filter((image) =>
     image.fileName.toLowerCase().includes(search.toLowerCase())
   ), [images, search]);
@@ -94,6 +104,31 @@ function App() {
     setSettings(nextSettings);
     setBrowserSettings(nextBrowserSettings);
   }
+
+  useEffect(() => {
+    setCheckedDrafts(old => {
+      const next = old.filter(id => queueDrafts.some(draft => draft.id === id && canDeleteDraft(draft)));
+      return next.length === old.length ? old : next;
+    });
+    if (selectedDraftId && !queueDrafts.some(draft => draft.id === selectedDraftId)) setSelectedDraftId(null);
+  }, [queueDrafts, selectedDraftId]);
+
+  useEffect(() => {
+    setPendingDeleteIds(old => old && (old.length !== selectedDrafts.length || old.some(id => !selectedDrafts.some(draft => draft.id === id))) ? null : old);
+  }, [checkedDrafts, queueDrafts]);
+
+  useEffect(() => {
+    setPendingDeleteIds(null);
+    setPendingImageDeleteIds(null);
+  }, [page]);
+
+  useEffect(() => {
+    setSelectedImages(old => {
+      const next = old.filter(id => images.some(image => image.id === id));
+      return next.length === old.length ? old : next;
+    });
+    setPendingImageDeleteIds(null);
+  }, [images]);
 
   useEffect(() => {
     void refresh().catch((error) => setNotice(error.message));
@@ -120,6 +155,7 @@ function App() {
     setTitle(selectedDraft.title);
     setAltText(selectedDraft.altText);
     setBoardName(selectedDraft.boardName || "");
+    setTikTokPrivacy(selectedDraft.tiktokPrivacy || "self_only");
     const time = selectedDraft.xScheduledAt ? new Date(selectedDraft.xScheduledAt) : null;
     setXScheduleAt(time ? new Date(time.getTime() - time.getTimezoneOffset()*60000).toISOString().slice(0,16) : "");
     setPublishedUrl(selectedDraft.publishedUrl || "");
@@ -157,10 +193,32 @@ function App() {
     setNotice(`已创建 ${created.length} 条发布草稿。`);
   });
 
+  const deleteSelectedImages = () => {
+    if (busy || !pendingImageDeleteIds?.length) return;
+    const ids = [...pendingImageDeleteIds];
+    setPendingImageDeleteIds(null);
+    void runBusy("正在删除素材…", async () => {
+      const deleted: string[] = [];
+      const errors: string[] = [];
+      for (const id of ids) {
+        try {
+          await window.reach.deleteImage(id);
+          deleted.push(id);
+        } catch (error) {
+          const name = images.find(image => image.id === id)?.fileName || id;
+          const message = error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "") : "删除失败";
+          errors.push(`${name}：${message}`);
+        }
+      }
+      setSelectedImages(old => old.filter(id => !deleted.includes(id)));
+      setNotice(`已删除 ${deleted.length} 张素材。${errors.length ? `另有 ${errors.length} 张未删除，已保留选择。${errors.slice(0, 3).join("；")}${errors.length > 3 ? "；其余失败项可重试查看。" : ""}` : ""}`);
+    });
+  };
+
   const saveDraft = async () => {
     if (!selectedDraft) return;
     await runBusy("正在保存草稿…", async () => {
-      await window.reach.updateDraft(selectedDraft.id, { caption, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, xScheduledAt: selectedDraft.platform === "x" && xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
+      await window.reach.updateDraft(selectedDraft.id, { caption, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, xScheduledAt: selectedDraft.platform === "x" && xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
     });
   };
 
@@ -174,7 +232,7 @@ function App() {
   const prepare = () => {
     if (!selectedDraft) return;
     void runBusy("正在准备发布素材…", async () => {
-      await window.reach.updateDraft(selectedDraft.id, { caption, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, xScheduledAt: selectedDraft.platform === "x" && xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
+      await window.reach.updateDraft(selectedDraft.id, { caption, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, xScheduledAt: selectedDraft.platform === "x" && xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
       await window.reach.prepareDraft(selectedDraft.id);
       setNotice("已打开素材文件夹并复制文案，请在平台官网完成发布。");
     });
@@ -184,9 +242,27 @@ function App() {
     if (!selectedDraft) return;
     void runBusy("正在更新发布记录…", async () => {
       await window.reach.markPublished(selectedDraft.id, publishedUrl || undefined);
-      setNotice("已在本地标记为已发布。");
+      setNotice("已标记为已发布，可在「发布记录」中查看。");
     });
   };
+
+  const deleteSelectedDrafts = () => {
+    if (busy || !pendingDeleteIds || !canDeleteSelection || pendingDeleteIds.length !== selectedDrafts.length || pendingDeleteIds.some(id => !selectedDrafts.some(draft => draft.id === id))) return;
+    const ids = pendingDeleteIds;
+    setPendingDeleteIds(null);
+    void runBusy("正在批量删除草稿…", async () => {
+      const count = await window.reach.deleteDrafts(ids);
+      setCheckedDrafts(old => old.filter(id => !ids.includes(id)));
+      setSelectedDraftId(old => old && ids.includes(old) ? null : old);
+      setNotice(`已删除 ${count} 条草稿。`);
+    });
+  };
+
+  const deletePublishRecords = (ids: string[]) => runBusy("正在删除发布记录…", async () => {
+    const count = await window.reach.deletePublishRecords(ids);
+    setDrafts(old => old.filter(draft => !ids.includes(draft.id)));
+    setNotice(`已删除 ${count} 条本地发布记录。`);
+  });
 
   const schedule = () => {
     if (!selectedDraft || !scheduleAt) return;
@@ -201,13 +277,14 @@ function App() {
   };
 
   const toggleImage = (id: string) => {
+    setPendingImageDeleteIds(null);
     setSelectedImages((old) => old.includes(id) ? old.filter((item) => item !== id) : [...old, id]);
   };
 
   const switchCaptionMode = (mode: "shared" | "independent") => {
     if (!selectedDraft) return;
     void runBusy("正在切换文案模式…", async () => {
-      await window.reach.updateDraft(selectedDraft.id, {caption, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, xScheduledAt: selectedDraft.platform === "x" && xScheduleAt ? new Date(xScheduleAt).toISOString() : null});
+      await window.reach.updateDraft(selectedDraft.id, {caption, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, xScheduledAt: selectedDraft.platform === "x" && xScheduleAt ? new Date(xScheduleAt).toISOString() : null});
       await window.reach.updateDraft(selectedDraft.id, {captionMode: mode});
     });
   };
@@ -224,7 +301,10 @@ function App() {
           <LayoutDashboard size={17}/> 素材库
         </button>
         <button className={`nav-item ${page === "queue" ? "active" : ""}`} onClick={() => setPage("queue")}>
-          <ListChecks size={17}/> 发布队列 <span className="nav-count">{drafts.length}</span>
+          <ListChecks size={17}/> 发布队列 <span className="nav-count">{queueDrafts.length}</span>
+        </button>
+        <button className={`nav-item ${page === "history" ? "active" : ""}`} onClick={() => setPage("history")}>
+          <CheckCircle2 size={17}/> 发布记录 <span className="nav-count">{publishRecords.length}</span>
         </button>
         <button className={`nav-item ${page === "settings" ? "active" : ""}`} onClick={() => setPage("settings")}>
           <Settings size={17}/> 设置与账号
@@ -241,7 +321,7 @@ function App() {
 
       <main className="main">
         <header className="topbar">
-          <div className="breadcrumbs">工作空间 <span>/</span> {page === "library" ? "素材库" : page === "queue" ? "发布队列" : page === "logs" ? "运行日志" : "设置"}</div>
+          <div className="breadcrumbs">工作空间 <span>/</span> {page === "library" ? "素材库" : page === "queue" ? "发布队列" : page === "history" ? "发布记录" : page === "logs" ? "运行日志" : "设置"}</div>
           <div className="top-actions">
             <span className="online-dot"/> 本地工作空间
             <div className="avatar">FR</div>
@@ -254,6 +334,7 @@ function App() {
           {publishing && <div className="busy-bar" role="status"><Loader2 className="spin" size={15}/>正在后台发布 {publishingIds.length} 条草稿，可继续浏览素材、设置和日志。当前批次及关联文案暂时锁定。</div>}
 
           {page === "logs" && <RunLogs draftId={logDraftId}/> }
+          {page === "history" && <PublishHistory records={publishRecords} images={images} platforms={PLATFORM_META} busy={busy} isLocked={draftLocked} onDelete={deletePublishRecords} onLogs={id => { setLogDraftId(id); setPage("logs"); }}/>}
           {page === "library" && (
             <>
               <section className="page-heading">
@@ -266,8 +347,8 @@ function App() {
 
               <section className="stats-grid">
                 <div className="stat-card"><span>图片总数</span><strong>{images.length}</strong><small>本地保存</small></div>
-                <div className="stat-card"><span>已选择</span><strong>{selectedImages.length}</strong><small>准备创建草稿</small></div>
-                <div className="stat-card"><span>草稿总数</span><strong>{drafts.length}</strong><small>涵盖所有平台</small></div>
+                <div className="stat-card"><span>已选择</span><strong>{selectedImages.length}</strong><small>可创建草稿或删除素材</small></div>
+                <div className="stat-card"><span>草稿总数</span><strong>{queueDrafts.length}</strong><small>涵盖所有平台</small></div>
               </section>
 
               <section className="panel">
@@ -275,12 +356,23 @@ function App() {
                   <div><h2>全部图片</h2><p>选择素材，设置统一文案或各平台独立文案。</p></div>
                   <div className="search-box"><Search size={15}/><input placeholder="搜索图片…" value={search} onChange={(e) => setSearch(e.target.value)}/></div>
                 </div>
+                <div className="library-actions heading-actions">
+                  <button className="button secondary" disabled={busy || !filteredImages.length} onClick={() => { setPendingImageDeleteIds(null); setSelectedImages(filteredImages.map(image => image.id)); }}><ListChecks size={16}/> {search ? "全选当前结果" : "全选"}（{filteredImages.length}）</button>
+                  <button className="button secondary" disabled={busy || !selectedImages.length} onClick={() => { setPendingImageDeleteIds(null); setSelectedImages([]); }}>清空选择</button>
+                  <button className="button danger" disabled={busy || !selectedImages.length} onClick={() => setPendingImageDeleteIds([...selectedImages])}><Trash2 size={16}/> 删除所选（{selectedImages.length}）</button>
+                  {selectedImages.some(id => !filteredImages.some(image => image.id === id)) && <span className="muted">包含 {selectedImages.filter(id => !filteredImages.some(image => image.id === id)).length} 张当前搜索结果外的素材</span>}
+                </div>
+                {pendingImageDeleteIds && <div className="delete-confirm" role="group" aria-label="确认删除素材">
+                  <p>确定删除选中的 {pendingImageDeleteIds.length} 张素材？将删除素材库中的图片副本及缩略图，无法恢复，导入前的原文件不受影响。发布记录会保留；仍被未完成草稿使用的图片会跳过。</p>
+                  <ul className="delete-file-list">{pendingImageDeleteIds.map(id => <li key={id}>{images.find(image => image.id === id)?.fileName || id}</li>)}</ul>
+                  <div className="heading-actions"><button className="button danger small" disabled={busy} onClick={deleteSelectedImages}>确认删除素材</button><button className="button secondary small" disabled={busy} onClick={() => setPendingImageDeleteIds(null)}>取消</button></div>
+                </div>}
                 {images.length === 0 ? (
                   <div className="empty-state"><div className="empty-icon"><Upload size={25}/></div><h3>素材库暂无图片</h3><p>导入文件夹或选择多张图片开始使用。</p><button className="button primary" onClick={importFolder}><FolderOpen size={16}/> 选择图片文件夹</button></div>
-                ) : (
+                ) : filteredImages.length === 0 ? <div className="empty-mini">没有匹配的图片，请调整搜索内容。</div> : (
                   <div className="image-grid">
                     {filteredImages.map((image) => (
-                      <button key={image.id} className={`image-card ${selectedImages.includes(image.id) ? "selected" : ""}`} onClick={() => toggleImage(image.id)}>
+                      <button key={image.id} className={`image-card ${selectedImages.includes(image.id) ? "selected" : ""}`} disabled={busy} aria-pressed={selectedImages.includes(image.id)} onClick={() => toggleImage(image.id)}>
                         <div className="image-thumb">
                           {image.thumbnailDataUrl ? <img src={image.thumbnailDataUrl} alt={image.fileName}/> : <FileImage/>}
                           <span className="select-indicator">{selectedImages.includes(image.id) ? <Check size={14}/> : ""}</span>
@@ -332,19 +424,28 @@ function App() {
                 <h2>多平台自动发布</h2>
                 <p className="muted">提交选中草稿：已设置时间的 X 草稿提交到 X 排程，其余草稿立即发布。登录检查或页面变化会暂停该平台；结果不确定时请先核对再重试。</p>
                 <div className="heading-actions">
-                  <button className="button secondary" disabled={busy} onClick={() => setCheckedDrafts(drafts.filter(d => canPublish(d) && !draftLocked(d)).slice(0, 100).map((d) => d.id))}>选择可发布草稿（最多 100 条）</button>
+                  <button className="button secondary" disabled={busy} onClick={() => setCheckedDrafts(queueDrafts.filter(d => canPublish(d) && !draftLocked(d)).slice(0, 100).map((d) => d.id))}>选择可发布草稿（最多 100 条）</button>
                   <button className="button secondary" disabled={busy} onClick={() => setCheckedDrafts([])}>清空选择</button>
-                  <button className="button primary" disabled={browserBusy || !checkedDrafts.length} onClick={publishSelected}><Send size={16}/> 提交选中的 {checkedDrafts.length} 条</button>
+                  <button className="button primary" disabled={browserBusy || !canSubmitSelection} onClick={publishSelected}><Send size={16}/> 提交选中的 {selectedDrafts.length} 条</button>
                 </div>
               </section>
               <div className="queue-layout">
                 <section className="panel draft-list">
-                  <div className="panel-heading"><div><h2>草稿</h2><p>{drafts.length} 条平台任务</p></div></div>
-                  {drafts.length === 0 ? <div className="empty-mini">暂无草稿，请先导入素材并创建草稿。</div> :
-                    drafts.map((draft) => {
+                  <div className="panel-heading"><div><h2>草稿</h2><p>{queueDrafts.length} 条平台任务 · 已选 {selectedDrafts.length} 条</p></div></div>
+                  <div className="draft-bulk-actions">
+                    <button className="text-button" disabled={busy || !queueDrafts.some(d => canDeleteDraft(d) && !draftLocked(d))} onClick={() => setCheckedDrafts(queueDrafts.filter(d => canDeleteDraft(d) && !draftLocked(d)).map(d => d.id))}>全选可删除草稿</button>
+                    <button className="text-button" disabled={busy || !checkedDrafts.length} onClick={() => setCheckedDrafts([])}>清空选择</button>
+                    <button className="button danger" disabled={busy || !canDeleteSelection} onClick={() => setPendingDeleteIds(selectedDrafts.map(d => d.id))}><Trash2 size={15}/> 批量删除（{selectedDrafts.length}）</button>
+                  </div>
+                  {pendingDeleteIds && <div className="delete-confirm" role="group" aria-label="确认批量删除草稿">
+                    <p>确定删除这 {pendingDeleteIds.length} 条草稿？删除后无法恢复，素材库中的图片会保留。</p>
+                    <div className="heading-actions"><button className="button danger small" disabled={busy || !canDeleteSelection} onClick={deleteSelectedDrafts}>确认删除</button><button className="button secondary small" disabled={busy} onClick={() => setPendingDeleteIds(null)}>取消</button></div>
+                  </div>}
+                  {queueDrafts.length === 0 ? <div className="empty-mini">暂无草稿。已完成的任务可在「发布记录」中查看。</div> :
+                    queueDrafts.map((draft) => {
                       const meta = PLATFORM_META[draft.platform];
                       const Icon = meta.icon;
-                      return <div key={draft.id} className="draft-select-row"><input type="checkbox" aria-label={`选择 ${meta.label} 草稿 ${draft.id}`} checked={checkedDrafts.includes(draft.id)} disabled={busy || draftLocked(draft) || !canPublish(draft)} onChange={(e) => setCheckedDrafts((old) => e.target.checked ? [...old, draft.id] : old.filter((id) => id !== draft.id))}/><button className={`draft-row ${selectedDraftId === draft.id ? "selected" : ""}`} onClick={() => setSelectedDraftId(draft.id)}>
+                      return <div key={draft.id} className="draft-select-row"><input type="checkbox" aria-label={`选择 ${meta.label} 草稿 ${draft.id}`} checked={checkedDrafts.includes(draft.id)} disabled={busy || draftLocked(draft) || !canDeleteDraft(draft)} onChange={(e) => setCheckedDrafts((old) => e.target.checked ? [...old, draft.id] : old.filter((id) => id !== draft.id))}/><button className={`draft-row ${selectedDraftId === draft.id ? "selected" : ""}`} onClick={() => setSelectedDraftId(draft.id)}>
                         <div className="platform-icon" style={{ color: meta.color }}><Icon size={18}/></div>
                         <div className="draft-row-main"><strong>{meta.label}</strong><span>{draft.imageIds.length} 张图片 · {STATUS_LABEL[draft.browserPublish?.state || draft.status] || draft.status}</span></div>
                         <span className={`status-dot ${draft.status}`}/>
@@ -357,7 +458,7 @@ function App() {
                     <>
                       <div className="detail-heading">
                         <div><div className="eyebrow">平台草稿</div><h2>{PLATFORM_META[selectedDraft.platform].label}</h2><p>{selectedDraft.imageIds.length} 张图片 · {STATUS_LABEL[selectedDraft.status]}</p></div>
-                        <button className="icon-button danger" disabled={detailBusy} title="删除草稿" onClick={() => void runBusy("正在删除草稿…", async () => { await window.reach.deleteDraft(selectedDraft.id); setCheckedDrafts((old) => old.filter((id) => id !== selectedDraft.id)); setSelectedDraftId(null); })}><Trash2 size={17}/></button>
+                        <button className="icon-button danger" disabled={detailBusy || !canDeleteDraft(selectedDraft)} title="删除草稿" onClick={() => void runBusy("正在删除草稿…", async () => { await window.reach.deleteDraft(selectedDraft.id); setCheckedDrafts((old) => old.filter((id) => id !== selectedDraft.id)); setSelectedDraftId(null); })}><Trash2 size={17}/></button>
                       </div>
                       {selectedDraft.browserPublish && <div className="published-box"><strong>{STATUS_LABEL[selectedDraft.browserPublish.state]}</strong><button className="text-button" onClick={() => { setLogDraftId(selectedDraft.id); setPage("logs"); }}>查看该任务日志</button><p className="muted">{selectedDraft.browserPublish.message}</p>
                         {selectedDraft.browserPublish.state === "uncertain" && <div className="detail-actions">
@@ -365,6 +466,7 @@ function App() {
                           <button className="button secondary" disabled={detailBusy} onClick={() => void runBusy("正在保存核对结果…", () => window.reach.resolvePublish(selectedDraft.id, false))}>{selectedDraft.xScheduledAt ? "已确认 X 中无此排程 — 允许重试" : "已确认未发布，允许重试"}</button>
                         </div>}
                       </div>}
+                      {selectedDraft.platform === "tiktok" && <div className="field"><label htmlFor="tiktok-privacy">谁可以看</label><select id="tiktok-privacy" disabled={detailBusy || !canEditCopy(selectedDraft)} value={tiktokPrivacy} onChange={e=>setTikTokPrivacy(e.target.value as "public" | "self_only")}><option value="self_only">仅自己</option><option value="public">所有人</option></select></div>}
                       {selectedDraft.platform === "pinterest" && <div className="field"><label>Pinterest 图板名称（必填，需完全匹配）</label><input disabled={detailBusy} value={boardName} onChange={(e) => setBoardName(e.target.value)}/></div>}
                       {selectedDraft.platform === "x" && <div className="field">
                         <label htmlFor="x-schedule">X 定时发布时间（{Intl.DateTimeFormat().resolvedOptions().timeZone}）</label>
@@ -414,7 +516,7 @@ function App() {
                         <label>图片替代说明</label>
                         <input disabled={detailBusy || !canEditCopy(selectedDraft)} value={altText} onChange={(e) => setAltText(e.target.value)} placeholder="供无障碍阅读使用的图片描述"/>
                       </div>
-                      <p className="drag-help">可在上方批量发布，也可准备素材后手动拖动上传。切换草稿前请保存修改。</p>
+                      <p className="drag-help">批量发布时，不同平台同时执行，同一平台依次执行。也可准备素材后手动拖动上传。切换草稿前请保存修改。</p>
                       <div className="detail-actions">
                         <button className="button secondary" onClick={() => void saveDraft()} disabled={detailBusy || !canEditCopy(selectedDraft)}><Check size={16}/> 保存修改</button>
                         <button className="button primary" onClick={prepare} disabled={detailBusy || !canEditCopy(selectedDraft)}><FolderOpen size={16}/> 准备素材并打开平台</button>

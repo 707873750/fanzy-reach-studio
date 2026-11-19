@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
+import vm from 'node:vm';
 
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'fanzy-log-test-'));
 try {
@@ -48,6 +49,28 @@ try {
   await broken.write({source:'app',level:'info',step:'recovered',message:'disk available'});
   assert.equal((await broken.snapshot()).storageError,null);
   console.log('PASS: log ordering, redaction, restart recovery, truncated-line recovery, rotation, memory fallback and disk recovery');
+  const loggerSource=await fs.readFile('src/main/run-logger.ts','utf8');
+  const ui=[];
+  const sandbox={exports:{},require:name=>name==='electron'?{app:{getPath:()=>root,getVersion:()=> 'test'},BrowserWindow:{getAllWindows:()=>[{isDestroyed:()=>false,webContents:{send:(_,e)=>ui.push(e)}}]}}:name==='node:path'?path:{LogStore}};
+  vm.runInNewContext(ts.transpileModule(loggerSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText,sandbox);
+  const logger=sandbox.exports;
+  await logger.initLogs();
+  logger.protectLogSecret('secret-sampling-value');
+  await logger.log({source:'app',level:'warn',step:'performance.ui',message:'secret-sampling-value'});
+  await logger.log({source:'app',level:'warn',step:'performance.gpu_exit',message:'GPU stopped'});
+  await logger.flushLogs();
+  assert.ok(!ui.some(e=>e.step==='performance.ui'));
+  assert.ok(ui.some(e=>e.step==='performance.gpu_exit'));
+  const sampling=await fs.readFile(path.join(root,'logs/performance/runtime.jsonl'),'utf8');
+  assert.ok(sampling.includes('performance.ui'));assert.ok(!sampling.includes('secret-sampling-value'));
+  assert.ok(!(await fs.readFile(path.join(root,'logs/runtime.jsonl'),'utf8')).includes('performance.ui'));
+  // Old mixed files remain intact, but their samples no longer crowd the UI.
+  const old=new LogStore(path.join(root,'legacy'));await old.init();
+  await old.write({source:'app',level:'info',step:'performance.ui',message:'old sample'});
+  await old.write({source:'app',level:'info',step:'task.succeeded',message:'done'});
+  const filteredHistory=new LogStore(path.join(root,'legacy'));await filteredHistory.init(e=>e.step!=='performance.ui');
+  assert.equal((await filteredHistory.snapshot()).entries.length,1);
+  console.log('PASS: isolated sampling files, retained GPU errors, UI filtering, history filtering and sampling redaction');
 } finally {
   const resolved=path.resolve(root);
   if(!resolved.startsWith(path.resolve(os.tmpdir())+path.sep)||!path.basename(resolved).startsWith('fanzy-log-test-')) throw Error('Unexpected temporary path');

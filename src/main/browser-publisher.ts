@@ -12,8 +12,6 @@ import { log, errorDetail } from "./run-logger";
 import { setPerformancePublishing } from "./performance-monitor";
 
 type Result = { state: "opened" | "succeeded" | "needs_attention" | "uncertain"; message?: string; url?: string };
-let worker: ChildProcessWithoutNullStreams | undefined;
-let pending: { resolve: (r: Result) => void; reject: (e: Error) => void; checkpoint: () => Promise<void> } | undefined;
 let busy = false;
 const locked = new Set<string>();
 
@@ -47,74 +45,97 @@ async function record(id: string, state: NonNullable<Draft["browserPublish"]>["s
   notify(draft);
 }
 
-function getWorker() {
-  if (worker) return worker;
-  const base = app.isPackaged ? process.resourcesPath : app.getAppPath();
-  const localPython = path.join(base, ".venv", "Scripts", "python.exe");
-  const configured = process.env.FANZY_PYTHON || (existsSync(localPython) ? localPython : undefined);
-  const child = spawn(configured || "py", [...(configured ? [] : ["-3"]), "-u", path.join(base, "python", "publisher.py")], {
-    windowsHide: true, stdio: "pipe", env: { ...process.env, PYTHONIOENCODING: "utf-8" }
-  });
-  worker = child;
-  void log({ source: "app", level: "info", step: "python.start", message: "启动 Python Playwright 发布进程" });
-  const fail = () => {
-    if (worker !== child) return;
-    worker = undefined;
-    pending?.reject(new Error("Python 发布进程已停止，请检查 Python 3.10 及以上版本和 Playwright 安装，必要时通过 FANZY_PYTHON 设置解释器路径。"));
-    pending = undefined;
-  };
-  child.on("error", error => { void log({ source: "app", level: "error", step: "python.spawn_failed", message: "Python 启动失败", detail: errorDetail(error) }); fail(); });
-  child.on("exit", (code, signal) => { void log({ source: "python", level: code === 0 ? "info" : "error", step: "python.exit", message: `Python 进程退出，退出码：${code}，信号：${signal || "无"}` }); fail(); });
-  child.stdin.on("error", error => { void log({ source: "app", level: "error", step: "python.pipe_error", message: "Python 通信管道错误", detail: errorDetail(error) }); fail(); });
-  createInterface({ input: child.stderr }).on("line", line => { void log({ source: "python", level: "error", step: "python.stderr", message: line }); });
-  createInterface({ input: child.stdout }).on("line", (line) => {
-    void (async () => {
-      if (worker !== child) return;
-      const message = JSON.parse(line);
-      if (message.type === "log") {
-        void log({ source: ["page", "extension"].includes(message.source) ? message.source : "python", level: ["warn", "error"].includes(message.level) ? message.level : "info",
-          step: String(message.step || "python.event"), message: String(message.message || ""), detail: typeof message.detail === "string" ? message.detail : undefined,
-          draftId: message.draftId, jobId: message.jobId, platform: message.platform });
-        return;
-      }
-      if (!pending) return;
-      if (message.type === "submitting") {
-        const current = pending;
-        await current.checkpoint();
-        if (pending === current) child.stdin.write(JSON.stringify({ ack: "persisted" }) + "\n");
-      } else if (message.type === "result") {
-        const current = pending;
-        pending = undefined;
-        current.resolve(message);
-      } else if (message.type === "fatal") {
-        throw new Error(message.message);
-      }
-    })().catch((error) => {
+function createPlatformClient() {
+  let worker: ChildProcessWithoutNullStreams | undefined;
+  let pending: { resolve: (r: Result) => void; reject: (e: Error) => void; checkpoint: () => Promise<void> } | undefined;
+  function getWorker() {
+    if (worker) return worker;
+    const base = app.isPackaged ? process.resourcesPath : app.getAppPath();
+    const localPython = path.join(base, ".venv", "Scripts", "python.exe");
+    const configured = process.env.FANZY_PYTHON || (existsSync(localPython) ? localPython : undefined);
+    const child = spawn(configured || "py", [...(configured ? [] : ["-3"]), "-u", path.join(base, "python", "publisher.py")], {
+      windowsHide: true, stdio: "pipe", env: { ...process.env, PYTHONIOENCODING: "utf-8" }
+    });
+    worker = child;
+    void log({ source: "app", level: "info", step: "python.start", message: "启动 Python Playwright 发布进程" });
+    const fail = () => {
       if (worker !== child) return;
       worker = undefined;
-      void log({ source: "app", level: "error", step: "python.protocol_error", message: "Python 通信处理失败", detail: errorDetail(error) });
-      pending?.reject(error); pending = undefined; child.kill();
+      pending?.reject(new Error("Python 发布进程已停止，请检查 Python 3.10 及以上版本和 Playwright 安装，必要时通过 FANZY_PYTHON 设置解释器路径。"));
+      pending = undefined;
+    };
+    child.on("error", error => { void log({ source: "app", level: "error", step: "python.spawn_failed", message: "Python 启动失败", detail: errorDetail(error) }); fail(); });
+    child.on("exit", (code, signal) => { void log({ source: "python", level: code === 0 ? "info" : "error", step: "python.exit", message: `Python 进程退出，退出码：${code}，信号：${signal || "无"}` }); fail(); });
+    child.stdin.on("error", error => { void log({ source: "app", level: "error", step: "python.pipe_error", message: "Python 通信管道错误", detail: errorDetail(error) }); fail(); });
+    createInterface({ input: child.stderr }).on("line", line => { void log({ source: "python", level: "error", step: "python.stderr", message: line }); });
+    createInterface({ input: child.stdout }).on("line", (line) => {
+      void (async () => {
+        if (worker !== child) return;
+        const message = JSON.parse(line);
+        if (message.type === "log") {
+          void log({ source: ["page", "extension"].includes(message.source) ? message.source : "python", level: ["warn", "error"].includes(message.level) ? message.level : "info",
+            step: String(message.step || "python.event"), message: String(message.message || ""), detail: typeof message.detail === "string" ? message.detail : undefined,
+            draftId: message.draftId, jobId: message.jobId, platform: message.platform });
+          return;
+        }
+        if (!pending) return;
+        if (message.type === "submitting") {
+          const current = pending;
+          await current.checkpoint();
+          if (pending === current) child.stdin.write(JSON.stringify({ ack: "persisted" }) + "\n");
+        } else if (message.type === "result") {
+          const current = pending;
+          pending = undefined;
+          current.resolve(message);
+        } else if (message.type === "fatal") {
+          throw new Error(message.message);
+        }
+      })().catch((error) => {
+        if (worker !== child) return;
+        worker = undefined;
+        void log({ source: "app", level: "error", step: "python.protocol_error", message: "Python 通信处理失败", detail: errorDetail(error) });
+        pending?.reject(error); pending = undefined; child.kill();
+      });
     });
-  });
-  return child;
+    return child;
+  }
+
+  async function request(payload: object, checkpoint = async () => {}) {
+    const child = getWorker();
+    return new Promise<Result>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending = undefined;
+        if (worker === child) worker = undefined;
+        child.kill();
+        void log({ source: "app", level: "error", step: "task.timeout", message: "等待浏览器或 Python 超时，已终止发布进程" });
+        reject(new Error("浏览器发布超时，重试前请核对平台和任务状态。"));
+      }, 240_000);
+      pending = {
+        resolve: (result) => { clearTimeout(timer); resolve(result); },
+        reject: (error) => { clearTimeout(timer); reject(error); }, checkpoint
+      };
+      child.stdin.write(JSON.stringify(payload) + "\n");
+    });
+  }
+
+  async function stop() {
+    const child = worker;
+    if (!child || child.exitCode !== null) return;
+    await new Promise<void>(resolve => {
+      const timer = setTimeout(() => { child.kill(); resolve(); }, 90000);
+      child.once("exit", () => { clearTimeout(timer); resolve(); });
+      child.stdin.end();
+    });
+  }
+
+  return {request, stop};
 }
 
-async function request(payload: object, checkpoint = async () => {}) {
-  const child = getWorker();
-  return new Promise<Result>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      pending = undefined;
-      if (worker === child) worker = undefined;
-      child.kill();
-      void log({ source: "app", level: "error", step: "task.timeout", message: "等待浏览器或 Python 超时，已终止发布进程" });
-      reject(new Error("浏览器发布超时，重试前请核对平台和任务状态。"));
-    }, 240_000);
-    pending = {
-      resolve: (result) => { clearTimeout(timer); resolve(result); },
-      reject: (error) => { clearTimeout(timer); reject(error); }, checkpoint
-    };
-    child.stdin.write(JSON.stringify(payload) + "\n");
-  });
+const clients = new Map<Platform, ReturnType<typeof createPlatformClient>>();
+function request(payload: {platform: Platform; [key: string]: unknown}, checkpoint = async () => {}) {
+  let client = clients.get(payload.platform);
+  if (!client) { client = createPlatformClient(); clients.set(payload.platform, client); }
+  return client.request(payload, checkpoint);
 }
 
 export async function openPlatformBrowser(platform: Platform) {
@@ -151,38 +172,44 @@ export async function publishDrafts(ids: string[]) {
   busy = true;
   drafts.forEach((draft) => locked.add(draft.id));
   setPerformancePublishing(true);
-  void log({ source: "app", level: "info", step: "batch.start", message: `开始批量发布，共 ${drafts.length} 条草稿` });
+  void log({ source: "app", level: "info", step: "batch.start", message: `开始跨平台并行发布，共 ${drafts.length} 条草稿；同平台依次执行` });
   const blocked = new Set<Platform>();
+  const groups = new Map<Platform, Draft[]>();
+  for (const draft of drafts) groups.set(draft.platform, [...(groups.get(draft.platform) || []), draft]);
   try {
-    for (const draft of drafts) {
-      if (blocked.has(draft.platform)) {
-        await record(draft.id, "needs_attention", "此平台的上一条任务需要处理，当前任务尚未提交。");
-        continue;
-      }
-      let submittedAt: string | undefined;
-      try {
-        await record(draft.id, "running", "正在准备图片并打开平台…");
-        const { folder } = await prepareDraft(draft.id, false);
-        void log({ source: "app", level: "info", step: "images.prepared", message: `已准备 ${draft.imageIds.length} 张平台图片`, draftId: draft.id, platform: draft.platform });
-        const files = (await fs.readdir(folder)).filter((file) => /^\d+-.*\.jpg$/.test(file)).sort().map((file) => path.join(folder, file));
-        if (files.length !== draft.imageIds.length) throw new Error("已准备的图片数量与草稿不一致");
-        const result = await request({ action: "publish", ...draft, files, ...browserOptions() }, async () => {
-          submittedAt = new Date().toISOString();
-          await record(draft.id, "uncertain", "正在提交，确认结果前请勿重试。", submittedAt);
-        });
-        if (result.state === "succeeded") {
-          updateDraftRecord(draft.id, { status: draft.xScheduledAt ? "platform_scheduled" : "published", publishedUrl: result.url || null });
-          await record(draft.id, draft.xScheduledAt ? "scheduled" : "succeeded", result.message || "发布成功", submittedAt);
-        } else {
-          await record(draft.id, submittedAt ? "uncertain" : "needs_attention", result.message || "请检查浏览器页面", submittedAt);
+    const results = await Promise.allSettled([...groups.values()].map(async platformDrafts => {
+      for (const draft of platformDrafts) {
+        if (blocked.has(draft.platform)) {
+          await record(draft.id, "needs_attention", "此平台的上一条任务需要处理，当前任务尚未提交。");
+          continue;
+        }
+        let submittedAt: string | undefined;
+        try {
+          await record(draft.id, "running", "正在准备图片并打开平台…");
+          const { folder } = await prepareDraft(draft.id, false);
+          void log({ source: "app", level: "info", step: "images.prepared", message: `已准备 ${draft.imageIds.length} 张平台图片`, draftId: draft.id, platform: draft.platform });
+          const files = (await fs.readdir(folder)).filter((file) => /^\d+-.*\.jpg$/.test(file)).sort().map((file) => path.join(folder, file));
+          if (files.length !== draft.imageIds.length) throw new Error("已准备的图片数量与草稿不一致");
+          const result = await request({ action: "publish", ...draft, files, ...browserOptions() }, async () => {
+            submittedAt = new Date().toISOString();
+            await record(draft.id, "uncertain", "正在提交，确认结果前请勿重试。", submittedAt);
+          });
+          if (result.state === "succeeded") {
+            updateDraftRecord(draft.id, { status: draft.xScheduledAt ? "platform_scheduled" : "published", publishedUrl: result.url || null });
+            await record(draft.id, draft.xScheduledAt ? "scheduled" : "succeeded", result.message || "发布成功", submittedAt);
+          } else {
+            await record(draft.id, submittedAt ? "uncertain" : "needs_attention", result.message || "请检查浏览器页面", submittedAt);
+            blocked.add(draft.platform);
+          }
+        } catch (error) {
+          void log({ source: "app", level: submittedAt ? "warn" : "error", step: submittedAt ? "task.uncertain" : "task.failed", message: submittedAt ? "已提交，结果待确认" : "发布任务失败", detail: errorDetail(error), draftId: draft.id, platform: draft.platform });
+          await record(draft.id, submittedAt ? "uncertain" : "needs_attention", submittedAt ? "已提交，结果待确认" : error instanceof Error ? error.message : "浏览器操作失败", submittedAt);
           blocked.add(draft.platform);
         }
-      } catch (error) {
-        void log({ source: "app", level: submittedAt ? "warn" : "error", step: submittedAt ? "task.uncertain" : "task.failed", message: submittedAt ? "已提交，结果待确认" : "发布任务失败", detail: errorDetail(error), draftId: draft.id, platform: draft.platform });
-        await record(draft.id, submittedAt ? "uncertain" : "needs_attention", submittedAt ? "已提交，结果待确认" : error instanceof Error ? error.message : "浏览器操作失败", submittedAt);
-        blocked.add(draft.platform);
       }
-    }
+    }));
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failure) throw failure.reason;
     return drafts;
   } finally { locked.clear(); busy = false; setPerformancePublishing(false); void log({ source: "app", level: "info", step: "batch.finished", message: `批次结束：${drafts.filter(d => d.status === "published").length}/${drafts.length} 已发布` }); }
 }
@@ -209,12 +236,8 @@ export async function recoverPublishing() {
   await persistStore();
 }
 
+
 export async function stopPublisher() {
-  const child = worker;
-  if (!child || child.exitCode !== null) return;
-  await new Promise<void>(resolve => {
-    const timer = setTimeout(() => { child.kill(); resolve(); }, 90000);
-    child.once("exit", () => { clearTimeout(timer); resolve(); });
-    child.stdin.end();
-  });
+  await Promise.all([...clients.values()].map(client => client.stop()));
+  clients.clear();
 }

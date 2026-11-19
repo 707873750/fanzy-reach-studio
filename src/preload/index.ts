@@ -39,6 +39,10 @@ const api = {
     ipcRenderer.invoke("drafts:list"),
   deleteDraft: (id: string): Promise<void> =>
     ipcRenderer.invoke("drafts:delete", id),
+  deleteDrafts: (ids: string[]): Promise<number> =>
+    ipcRenderer.invoke("drafts:delete-many", ids),
+  deletePublishRecords: (ids: string[]): Promise<number> =>
+    ipcRenderer.invoke("history:delete", ids),
   updateDraft: (id: string, patch: DraftPatch): Promise<Draft> =>
     ipcRenderer.invoke("drafts:update", id, patch),
   generateCaption: (id: string): Promise<Draft> =>

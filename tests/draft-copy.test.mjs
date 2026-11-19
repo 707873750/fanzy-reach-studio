@@ -6,6 +6,9 @@ import {createRequire} from 'node:module';
 const source = await fs.readFile('src/shared/draft-copy.ts','utf8');
 const compiled = ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;
 const {applyCaptionPatch,canEditCopy} = await import('data:text/javascript;base64,'+Buffer.from(compiled).toString('base64'));
+const lifecycleSource = await fs.readFile('src/shared/draft-lifecycle.ts', 'utf8');
+const lifecycleCompiled = ts.transpileModule(lifecycleSource, {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;
+const lifecycle = await import('data:text/javascript;base64,' + Buffer.from(lifecycleCompiled).toString('base64'));
 const defaultsSource=await fs.readFile('src/shared/platform-defaults.ts','utf8');
 const defaultsCompiled=ts.transpileModule(defaultsSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;
 const defaultsModule=await import('data:text/javascript;base64,'+Buffer.from(defaultsCompiled).toString('base64'));
@@ -40,7 +43,7 @@ const store={getStore:()=>data,findDraft:id=>data.drafts.find(d=>d.id===id),plat
 const serviceSource=await fs.readFile('src/main/draft-service.ts','utf8');
 const serviceCompiled=ts.transpileModule(serviceSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText;
 const nativeRequire=createRequire(import.meta.url);
-const sandbox={exports:{},require:name=>name==='./store'?store:name==='../shared/draft-copy'?{applyCaptionPatch,canEditCopy}:name==='../shared/platform-defaults'?defaultsModule:name==='electron'?{}:name==='sharp'?()=>{}:nativeRequire(name)};
+const sandbox={exports:{},require:name=>name==='./store'?store:name==='../shared/draft-copy'?{applyCaptionPatch,canEditCopy}:name==='../shared/draft-lifecycle'?lifecycle:name==='../shared/platform-defaults'?defaultsModule:name==='electron'?{}:name==='sharp'?()=>{}:nativeRequire(name)};
 vm.runInNewContext(serviceCompiled,sandbox);
 const svc=sandbox.exports;
 const batch=await svc.createDrafts(['0','1','2','3','4'],['instagram','x','pinterest'],{sharedCaption:'共用正文',platforms:{instagram:{mode:'shared',caption:'IG 备份'},x:{mode:'independent',caption:'X 专属'},pinterest:{mode:'shared',caption:''}}});
@@ -94,3 +97,66 @@ assert.deepEqual(Array.from(tikTokBatch,d=>d.imageIds.length),[35,1]);
 assert.ok(tikTokBatch.every(d=>d.caption==='Photo story'&&d.xScheduledAt===null&&!d.boardName));
 assert.deepEqual(Array.from(tikTokBatch[0].imageIds),data.images.slice(0,35).map(i=>i.id));
 console.log('PASS: TikTok defaults migration, photo limits, ordered grouping and shared captions');
+
+// Existing successful records move out of the queue without a data migration.
+const records = [make('published', {status:'published'}), make('platform-scheduled', {status:'platform_scheduled'}),
+  make('succeeded', {browserPublish:{state:'succeeded'}}), make('scheduled-browser', {browserPublish:{state:'scheduled'}})];
+const protectedDrafts = [make('running', {browserPublish:{state:'running'}}), make('uncertain', {browserPublish:{state:'uncertain'}})];
+const editable = [make('local-reminder', {status:'scheduled'}), make('failed', {browserPublish:{state:'needs_attention'}}), make('plain')];
+assert.ok(records.every(lifecycle.isPublishRecord));
+assert.ok([...protectedDrafts, ...editable].every(d => !lifecycle.isPublishRecord(d)));
+assert.ok([...records, ...protectedDrafts].every(d => !lifecycle.canDeleteDraft(d)));
+assert.ok(editable.every(lifecycle.canDeleteDraft));
+data.drafts = [...records, ...protectedDrafts, ...editable];
+const beforeDelete = JSON.stringify(data);
+const beforePersisted = persisted;
+for (const protectedDraft of [...records, ...protectedDrafts]) {
+  await assert.rejects(svc.deleteDrafts(['plain', protectedDraft.id]), /不能删除/);
+  await assert.rejects(svc.deleteDraft(protectedDraft.id), /不能删除/);
+  assert.equal(JSON.stringify(data), beforeDelete, 'invalid batches leave all records untouched');
+  assert.equal(persisted, beforePersisted, 'invalid batches do not write to storage');
+}
+for (const invalid of [null, [], 'plain', [null], [''], ['plain', 'missing']]) {
+  await assert.rejects(svc.deleteDrafts(invalid));
+  assert.equal(JSON.stringify(data), beforeDelete);
+}
+const assetsBefore = JSON.stringify(data.images);
+assert.equal(await svc.deleteDrafts(['plain', 'failed', 'plain']), 2);
+assert.equal(JSON.stringify(data.images), assetsBefore, 'deleting drafts preserves library assets');
+data = JSON.parse(persisted);
+assert.ok(!data.drafts.some(d => ['plain', 'failed'].includes(d.id)));
+assert.equal(data.drafts.length, records.length + protectedDrafts.length + 1);
+await svc.deleteDraft('local-reminder');
+assert.equal(data.drafts.length, records.length + protectedDrafts.length);
+console.log('PASS: history separation, atomic bulk deletion, protected results, validation, deduplication and persistence');
+
+data.drafts = [...records, ...protectedDrafts, ...editable];
+const historyBeforeDelete = JSON.stringify(data);
+const historyBeforePersisted = persisted;
+for (const draft of [...protectedDrafts, ...editable]) {
+  await assert.rejects(svc.deletePublishRecords(['published', draft.id]), /只能删除/);
+  assert.equal(JSON.stringify(data), historyBeforeDelete, 'mixed batches preserve every record and draft');
+  assert.equal(persisted, historyBeforePersisted);
+}
+for (const invalid of [null, [], 'published', [null], [''], ['published', 'missing']]) {
+  await assert.rejects(svc.deletePublishRecords(invalid));
+  assert.equal(JSON.stringify(data), historyBeforeDelete);
+}
+for (const state of ['running']) {
+  const inconsistent = make('inconsistent', {status:'published',browserPublish:{state}});
+  assert.equal(lifecycle.canDeletePublishRecord(inconsistent), false);
+  data.drafts.push(inconsistent);
+  await assert.rejects(svc.deletePublishRecords(['published', 'inconsistent']), /只能删除/);
+  data.drafts.pop();
+  assert.equal(JSON.stringify(data), historyBeforeDelete);
+}
+const manuallyCompleted = make('manual-completion', {status:'published',browserPublish:{state:'uncertain'}});
+assert.equal(lifecycle.canDeletePublishRecord(manuallyCompleted), true);
+data.drafts.push(manuallyCompleted);
+assert.equal(await svc.deletePublishRecords(['manual-completion']), 1);
+assert.equal(await svc.deletePublishRecords(['published']), 1);
+assert.equal(await svc.deletePublishRecords(['platform-scheduled', 'succeeded', 'scheduled-browser', 'succeeded']), 3);
+data = JSON.parse(persisted);
+assert.equal(JSON.stringify(data.drafts), JSON.stringify([...protectedDrafts, ...editable]), 'history deletion preserves unfinished drafts');
+assert.equal(JSON.stringify(data.images), assetsBefore, 'history deletion preserves library images');
+console.log('PASS: single/bulk history deletion, scheduled records, atomic validation, protected tasks, deduplication and persistence');

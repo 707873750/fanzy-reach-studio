@@ -7,6 +7,7 @@ import { getAppPaths, getStore, findDraft, findImage, persistStore, updateDraftR
 import type { CopyOptions, Draft, DraftPatch, Platform } from "../shared/types";
 import { applyCaptionPatch, canEditCopy } from "../shared/draft-copy";
 import { readPlatformDefaults } from "../shared/platform-defaults";
+import { canDeleteDraft, canDeletePublishRecord } from "../shared/draft-lifecycle";
 
 const PLATFORM_URLS: Record<Platform, string> = {
   instagram: "https://www.instagram.com/",
@@ -52,6 +53,7 @@ export async function createDrafts(imageIds: string[], platforms: Platform[], co
         platform,
         imageIds: group,
         title: config.title,
+        tiktokPrivacy: platform === "tiktok" ? config.tiktokPrivacy : undefined,
         boardName: platform === "pinterest" ? config.boardName : undefined,
         xScheduledAt: platform === "x" && config.scheduleDelayMinutes ? new Date(createdTime + config.scheduleDelayMinutes * 60000).toISOString() : null,
         copyGroupId,
@@ -95,6 +97,10 @@ export async function updateDraft(draftId: string, patch: DraftPatch) {
       allowed.xScheduledAt = new Date(time).toISOString();
     }
   }
+  if (patch.tiktokPrivacy !== undefined) {
+    if (existing.platform !== "tiktok" || !["public", "self_only"].includes(patch.tiktokPrivacy)) throw new Error("无效的 TikTok 隐私设置");
+    allowed.tiktokPrivacy = patch.tiktokPrivacy;
+  }
   if (typeof patch.boardName === "string") allowed.boardName = patch.boardName.trim().slice(0, 200);
   if (typeof patch.title === "string") allowed.title = patch.title.slice(0, 200);
   if (typeof patch.altText === "string") allowed.altText = patch.altText.slice(0, 1000);
@@ -106,9 +112,39 @@ export async function updateDraft(draftId: string, patch: DraftPatch) {
 }
 
 export async function deleteDraft(draftId: string) {
+  await deleteDrafts([draftId]);
+}
+
+export async function deleteDrafts(draftIds: string[]) {
+  if (!Array.isArray(draftIds) || !draftIds.length || draftIds.some(id => typeof id !== "string" || !id)) {
+    throw new Error("请选择要删除的草稿");
+  }
   const store = getStore();
-  store.drafts = store.drafts.filter((draft) => draft.id !== draftId);
+  const ids = new Set(draftIds);
+  for (const id of ids) {
+    const draft = store.drafts.find(item => item.id === id);
+    if (!draft) throw new Error("部分草稿已不存在，请刷新后重试");
+    if (!canDeleteDraft(draft)) throw new Error("已发布、已排程、正在发布或结果待确认的任务不能删除，请刷新并核对结果");
+  }
+  store.drafts = store.drafts.filter((draft) => !ids.has(draft.id));
   await persistStore();
+  return ids.size;
+}
+
+export async function deletePublishRecords(recordIds: string[]) {
+  if (!Array.isArray(recordIds) || !recordIds.length || recordIds.some(id => typeof id !== "string" || !id)) {
+    throw new Error("请选择要删除的发布记录");
+  }
+  const store = getStore();
+  const ids = new Set(recordIds);
+  for (const id of ids) {
+    const record = store.drafts.find(item => item.id === id);
+    if (!record) throw new Error("部分发布记录已不存在，请刷新后重试");
+    if (!canDeletePublishRecord(record)) throw new Error("只能删除已发布或平台已确认排程的记录，请等待发布完成并核对结果");
+  }
+  store.drafts = store.drafts.filter(record => !ids.has(record.id));
+  await persistStore();
+  return ids.size;
 }
 
 export async function prepareDraft(draftId: string, interactive = true) {

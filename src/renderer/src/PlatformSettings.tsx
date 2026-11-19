@@ -23,6 +23,7 @@ function PlatformCard({platform,initial}: {platform:Platform;initial:PlatformDef
     <fieldset disabled={saving} style={{border:0,padding:0,margin:0,minWidth:0}}>
       {platform!=="pinterest" && <div className="field"><label htmlFor={id("images")}>每条草稿的图片数量</label><input id={id("images")} type="number" min={1} max={platform==="tiktok"?35:platform==="x"?4:10} value={Number.isNaN(value.imagesPerDraft)?"":value.imagesPerDraft} onChange={e=>change({imagesPerDraft:e.target.valueAsNumber})}/><small>新建草稿时按此数量分组，最后一组可不足此数量。</small></div>}
       {platform==="tiktok" && <small>TikTok 图片轮播最多 35 张，按比例缩放至 1080 × 1920 以内。自动发布需要账号的网页端提供图片上传入口；仅支持视频时请使用手机端发布。</small>}
+      {platform==="tiktok" && <div className="field"><label htmlFor={id("privacy")}>默认谁可以看</label><select id={id("privacy")} value={value.tiktokPrivacy || "self_only"} onChange={e=>change({tiktokPrivacy:e.target.value as "public" | "self_only"})}><option value="self_only">仅自己</option><option value="public">所有人</option></select></div>}
       {platform==="pinterest" && <>
         <p className="muted">每张图片创建一条 Pin 草稿。</p>
         <div className="field"><label htmlFor={id("board")}>默认图板名称</label><input id={id("board")} maxLength={200} value={value.boardName} onChange={e=>change({boardName:e.target.value})} placeholder="填写现有图板的完整名称"/></div>
