@@ -34,6 +34,8 @@ export type DraftStatus = "draft" | "ready" | "scheduled" | "local_scheduled" | 
 export interface ImageAsset {
   id: string;
   fileName: string;
+  sourceFolders?: string[];
+  video?: { duration: number; fps: number; codec: string; audioCodec?: string; pixelFormat: string };
   mimeType: string;
   width: number;
   height: number;
@@ -47,6 +49,7 @@ export interface Draft {
   id: string;
   platform: Platform;
   imageIds: string[];
+  mediaType?: "image" | "video";
   title: string;
   caption: string;
   captionHtml?: string;
@@ -107,6 +110,7 @@ export interface ReachApi {
   importFolder: () => Promise<ImportResult>;
   listImages: () => Promise<ImageAsset[]>;
   deleteImage: (imageId: string) => Promise<void>;
+  previewMedia: (id: string) => Promise<void>;
   createDrafts: (imageIds: string[], platforms: Platform[], copy?: CopyOptions) => Promise<Draft[]>;
   listDrafts: () => Promise<Draft[]>;
   deleteDraft: (draftId: string) => Promise<void>;

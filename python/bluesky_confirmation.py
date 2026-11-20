@@ -10,6 +10,7 @@ class BlueskyConfirmation(PinterestConfirmation):
         super().__init__(page)
         self.expected = '\n\n'.join(x for x in [job.get('title', ''), job.get('caption', ''), ' '.join(job.get('hashtags', []))] if x)
         self.count = len(job['files'])
+        self.video = job.get('mediaType') == 'video'
         self.repos = {}
 
     def on_request(self, request):
@@ -36,7 +37,10 @@ class BlueskyConfirmation(PinterestConfirmation):
             if len(records) != 1 or record.get('$type') != 'app.bsky.feed.post' or record.get('text') != self.expected or record.get('reply'):
                 return
             embed = record.get('embed', {})
-            if embed.get('$type') != 'app.bsky.embed.images' or len(embed.get('images', [])) != self.count:
+            if self.video:
+                if embed.get('$type') != 'app.bsky.embed.video' or not embed.get('video', {}).get('ref'):
+                    return
+            elif embed.get('$type') != 'app.bsky.embed.images' or len(embed.get('images', [])) != self.count:
                 return
             self.repos[request] = repo
             self.requests.add(request)

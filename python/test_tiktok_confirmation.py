@@ -5,6 +5,21 @@ from tiktok_confirmation import TikTokConfirmation
 
 
 class TikTokConfirmationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_only_permalink_matching_confirmed_item_is_retained(self):
+        for share,expected in [('https://www.tiktok.com/@owner/video/123456789012345?lang=en','https://www.tiktok.com/@owner/video/123456789012345'),('https://www.tiktok.com/@owner/video/987654321012345',None),('https://www.tiktok.com/tiktokstudio/content',None)]:
+            capture=TikTokConfirmation(Mock(evaluate=AsyncMock()))
+            await capture.read(SimpleNamespace(status=200,json=AsyncMock(return_value={'status_code':0,'item_id':'123456789012345','share_url':share})))
+            self.assertTrue(capture.confirmed)
+            self.assertEqual(capture.url,expected)
+            await capture.close()
+
+    async def test_project_id_alone_is_not_a_permalink(self):
+        capture=TikTokConfirmation(Mock(evaluate=AsyncMock()))
+        await capture.read(SimpleNamespace(url='https://www.tiktok.com/tiktok/web/project/post/v1',status=200,json=AsyncMock(return_value={'status_code':0,'project_id':'123456789','single_post_resp_list':[{'post_id':'123456789012345'}]})))
+        self.assertTrue(capture.confirmed)
+        self.assertIsNone(capture.url)
+        await capture.close()
+
     async def test_web_project_response(self):
         for url,body,expected in [
             ('/tiktok/web/project/post/v1/',{'status_code':0,'project_id':'123456789','single_post_resp_list':[{'post_id':'123456789012345'}]},True),

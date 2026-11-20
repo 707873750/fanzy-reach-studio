@@ -11,6 +11,8 @@ const source=await fs.readFile('src/main/browser-publisher.ts','utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText;
 let drafts=[], spawned=[], active=new Set(), maximum=0, starts=[], finished=[], failPlatform, crashPlatform, fallbackPlatform, lockedDuringCompletion=false;
 const events=[];
+const urlModule={exports:{}};
+vm.runInNewContext(ts.transpileModule(await fs.readFile('src/shared/post-url.ts','utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:urlModule.exports,URL});
 const store={
   findDraft:id=>drafts.find(d=>d.id===id),
   getAppPaths:()=>({base:'/fixture'}),
@@ -31,7 +33,7 @@ function spawn() {
       setTimeout(()=>{
         active.delete(job.platform);finished.push(job.id);
         assert.throws(()=>api.assertNotPublishing(job.id));lockedDuringCompletion=true;
-        emit({type:'result',state:job.platform===failPlatform?'needs_attention':'succeeded'});
+        emit({type:'result',state:job.platform===failPlatform?'needs_attention':'succeeded',url:job.platform==='x'?'https://x.com/i/status/123456789':'https://www.tiktok.com/tiktokstudio/content'});
       },15);
     } else if(message.action==='publish') {
       job=message;
@@ -52,9 +54,10 @@ const dependencies={
   electron:{app:{isPackaged:false,getAppPath:()=>'/fixture'},BrowserWindow:{getAllWindows:()=>[]}},
   'node:child_process':{spawn},'node:readline':{createInterface},
   'node:fs/promises':{readdir:async()=>['01-photo.jpg']},'node:fs':{existsSync:()=>true},'node:path':path,
-  './store':store,'./draft-service':{prepareDraft:async id=>({folder:'/fixture/'+id})},
+  './store':store,'./draft-service':{prepareDraft:async id=>({folder:'/fixture/'+id, files:['/fixture/'+id+'/01-photo.jpg'], mediaType:'image'})},
   './publisher-runtime':{publisherCommand:()=>({command:'fixture-python',args:[]}),macSessionKey:()=>undefined},
   './run-logger':{log:async e=>events.push(e),errorDetail:String},
+  '../shared/post-url':urlModule.exports,
   './performance-monitor':{setPerformancePublishing:()=>{}}
 };
 const sandbox={exports:{},require:name=>{assert.ok(name in dependencies,name);return dependencies[name];},process:{env:{}},setTimeout,clearTimeout};
@@ -70,6 +73,8 @@ assert.equal(spawned.length,2,'login and publishing reuse the same platform work
 assert.equal(maximum,2,'different platforms overlap');
 assert.ok(starts.indexOf('x2')>starts.indexOf('t1'));
 assert.ok(drafts.every(d=>d.status==='published'));
+assert.ok(drafts.filter(d=>d.platform==='x').every(d=>d.publishedUrl==='https://x.com/i/status/123456789'));
+assert.ok(drafts.filter(d=>d.platform==='tiktok').every(d=>d.publishedUrl===null),'never store an upload/management page as the post URL');
 assert.ok(lockedDuringCompletion);
 api.assertNotPublishing('x1');
 
@@ -101,6 +106,7 @@ await api.publishDrafts(['local','native']);
 assert.equal(store.findDraft('local').status,'local_scheduled');
 assert.ok(!starts.includes('local'),'future local jobs must not open a browser');
 assert.equal(store.findDraft('native').status,'platform_scheduled');
+assert.equal(store.findDraft('native').publishedUrl,null,'scheduled records must not contain a premature public permalink');
 await assert.rejects(api.publishDrafts(['local']),/本地队列/);
 await api.runDueScheduledDrafts();
 assert.ok(!starts.includes('local'),'future jobs are not due');

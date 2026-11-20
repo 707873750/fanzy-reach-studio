@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Noti
 import path from "node:path";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
-import { initStore, getStore, persistStore, getAppPaths, findDraft } from "./store";
+import { initStore, getStore, persistStore, getAppPaths, findDraft, findImage } from "./store";
 import { importFiles, listImages, deleteImage } from "./image-service";
 import { createDrafts, listDrafts, deleteDraft, deleteDrafts, deletePublishRecords, updateDraft, prepareDraft, markPublished, scheduleDraft } from "./draft-service";
 import { generateCaption, generateSharedCaption, saveDeepSeekKey, clearDeepSeekKey, getSettings } from "./ai-service";
@@ -29,7 +29,7 @@ async function walkImages(folder: string, depth = 0): Promise<string[]> {
     const fullPath = path.join(folder, entry.name);
     if (entry.isDirectory()) {
       results.push(...await walkImages(fullPath, depth + 1));
-    } else if (entry.isFile() && /\.(jpe?g|png|webp|gif)$/i.test(entry.name)) {
+    } else if (entry.isFile() && /\.(jpe?g|png|webp|gif|mp4|mov|m4v|webm)$/i.test(entry.name)) {
       results.push(fullPath);
     }
     if (results.length >= 500) break;
@@ -70,7 +70,7 @@ function registerIpc() {
     const result = await dialog.showOpenDialog({
       title: "选择图片",
       properties: ["openFile", "multiSelections"],
-      filters: [{ name: "图片", extensions: ["jpg", "jpeg", "png", "webp", "gif"] }]
+      filters: [{ name: "图片和视频", extensions: ["jpg", "jpeg", "png", "webp", "gif", "mp4", "mov", "m4v", "webm"] }]
     });
     if (result.canceled) return { imported: [], duplicates: [], errors: [] };
     return importFiles(result.filePaths);
@@ -85,11 +85,17 @@ function registerIpc() {
       return { imported: [], duplicates: [], errors: [] };
     }
     const files = await walkImages(result.filePaths[0]);
-    return importFiles(files);
+    return importFiles(files, result.filePaths[0]);
   });
 
   handle("images:list", () => listImages());
   handle("images:delete", (_event, imageId: string) => deleteImage(imageId));
+  handle("images:preview", async (_event, id: string) => {
+    const asset = findImage(id);
+    if (!asset) throw new Error("素材已不存在");
+    const error = await shell.openPath(asset.originalPath);
+    if (error) throw new Error(error);
+  });
 
   handle("drafts:create", (_event, imageIds: string[], platforms: Platform[], copy?: CopyOptions) => {
     const allowed = ["instagram", "x", "pinterest", "tiktok", "bluesky", "facebook"];
@@ -136,12 +142,12 @@ function registerIpc() {
 
     const maxFiles = draft.platform === "tiktok" ? 35 : (draft.platform === "instagram" || draft.platform === "facebook") ? 10 : (draft.platform === "x" || draft.platform === "bluesky") ? 4 : 1;
     const files = fsSync.readdirSync(preparedFolder, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && /\.(jpe?g|png|webp)$/i.test(entry.name))
+      .filter((entry) => entry.isFile() && /\.(jpe?g|png|webp|mp4)$/i.test(entry.name))
       .slice(0, maxFiles)
       .map((entry) => path.join(preparedFolder, entry.name));
     if (!files.length || files.some((file) => !fsSync.existsSync(file))) return;
 
-    const icon = nativeImage.createFromPath(files[0]);
+    const icon = nativeImage.createFromPath(findImage(draft.imageIds[0])?.thumbnailPath || files[0]);
     if (icon.isEmpty()) return;
     event.sender.startDrag({ file: files[0], files, icon });
   });

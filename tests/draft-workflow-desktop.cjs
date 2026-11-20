@@ -3,7 +3,7 @@
 if (process.type === 'renderer') {
   const make = (id, extra = {}) => ({id, platform:'x', imageIds:[], title:id, caption:`文案 ${id}`, hashtags:[], altText:'', status:'draft', scheduledAt:null, preparedFolder:null, publishedUrl:null, createdAt:'2026-01-01T00:00:00Z', updatedAt:'2026-01-01T00:00:00Z', ...extra});
   const fixture = window.fixture = {
-    drafts:[make('plain'), make('failed', {browserPublish:{state:'needs_attention',message:'尚未提交'}}), make('uncertain', {browserPublish:{state:'uncertain',message:'请核对结果'}}), make('published', {status:'published'}), make('platform-scheduled', {status:'platform_scheduled',xScheduledAt:'2030-01-01T00:00:00Z'})],
+    drafts:[make('plain'), make('failed', {browserPublish:{state:'needs_attention',message:'尚未提交'}}), make('uncertain', {browserPublish:{state:'uncertain',message:'请核对结果'}}), make('published', {status:'published',publishedUrl:'https://x.com/i/status/123456789'}), make('platform-scheduled', {status:'platform_scheduled',publishedUrl:'https://x.com/compose/post',xScheduledAt:'2030-01-01T00:00:00Z'})],
     images:['free-a','free-b','blocked'].map(id=>({id,fileName:`${id}.jpg`,width:800,height:600})),
     deletedImages:[], imageBlocked:true,
     deleted:[], deletedRecords:[], failRecordDelete:false, progress:()=>{}
@@ -15,6 +15,7 @@ if (process.type === 'renderer') {
     getBrowserSettings:async()=>({showBrowser:false,channel:'chrome'}),
     onScheduleReminder:()=>()=>{}, onPublishProgress:fn=>{fixture.progress=fn;return()=>{};},
     reportUiPerformance:async()=>{}, reportRendererError:async()=>{},
+    copyText:async text=>{fixture.copied=text;return true;}, openExternal:async url=>{fixture.opened=url;},
     deleteDrafts:async ids=>{fixture.deleted.push([...ids]);fixture.drafts=fixture.drafts.filter(d=>!ids.includes(d.id));return ids.length;},
     deletePublishRecords:async ids=>{if(fixture.failRecordDelete) throw Error('测试：记录删除失败');fixture.deletedRecords.push([...ids]);fixture.drafts=fixture.drafts.filter(d=>!ids.includes(d.id));return ids.length;},
     markPublished:async id=>{const draft=fixture.drafts.find(d=>d.id===id);draft.status='published';return structuredClone(draft);}
@@ -48,7 +49,7 @@ if (process.type === 'renderer') {
       await click('全选当前结果');
       await waitFor(`document.querySelectorAll('.image-card[aria-pressed="true"]').length===2`);
       await click('删除所选');
-      await waitFor(`document.querySelector('.delete-confirm')?.textContent.includes('选中的 2 张')`);
+      await waitFor(`document.querySelector('.delete-confirm')?.textContent.includes('选中的 2 项')`);
       await click('取消');
       await waitFor(`!document.querySelector('.delete-confirm')`);
       assert.equal(await evaluate('window.fixture.deletedImages.length'),0);
@@ -57,11 +58,11 @@ if (process.type === 'renderer') {
       await click('全选');
       await waitFor(`document.querySelectorAll('.image-card[aria-pressed="true"]').length===3`);
       await click('删除所选');
-      await waitFor(`document.querySelector('.delete-confirm')?.textContent.includes('选中的 3 张')`);
+      await waitFor(`document.querySelector('.delete-confirm')?.textContent.includes('选中的 3 项')`);
       await click('确认删除素材');
       await waitFor(`document.querySelectorAll('.image-card').length===1 && !document.querySelector('.busy-bar')`);
       assert.equal(await evaluate(`document.querySelector('.image-card').getAttribute('aria-pressed')`),'true');
-      assert.ok(await evaluate(`document.querySelector('.notice').textContent.includes('已删除 2 张素材') && document.querySelector('.notice').textContent.includes('1 张未删除')`));
+      assert.ok(await evaluate(`document.querySelector('.notice').textContent.includes('已删除 2 项素材') && document.querySelector('.notice').textContent.includes('1 张未删除')`));
       assert.deepEqual(await evaluate('window.fixture.deletedImages'),['free-a','free-b']);
       await evaluate('window.fixture.imageBlocked=false');
       await click('删除所选');
@@ -75,7 +76,15 @@ if (process.type === 'renderer') {
       assert.equal(await evaluate(`document.querySelectorAll('.draft-select-row input:disabled').length`),1);
       await click('发布记录');
       await waitFor(`document.querySelectorAll('.draft-row').length===2`);
-      assert.equal(await evaluate(`document.querySelectorAll('.draft-detail input,.draft-detail textarea').length`),0,'history is read only');
+      assert.equal(await evaluate(`document.querySelectorAll('.draft-detail input:not([readonly]),.draft-detail textarea:not([readonly])').length`),0,'history is read only');
+      await waitFor(`document.querySelector('#published-post-url')?.value==='https://x.com/i/status/123456789'`);
+      await click('复制地址');
+      await waitFor(`window.fixture.copied==='https://x.com/i/status/123456789' && document.querySelector('[role=status]')?.textContent==='帖子地址已复制'`);
+      await evaluate(`document.querySelector('a.record-link').click()`);
+      assert.equal(await evaluate('window.fixture.opened'),'https://x.com/i/status/123456789');
+      await evaluate(`document.querySelector('.draft-select-row:last-child .draft-row').click()`);
+      await waitFor(`!document.querySelector('#published-post-url') && document.querySelector('.draft-detail').textContent.includes('尚未取得正式帖子地址')`);
+      console.log('PASS: history displays, copies and opens permalinks; hides old composer URLs');
       assert.ok(await evaluate(`document.querySelector('.draft-list').textContent.includes('平台已排程')`));
       await click('发布队列');
       await waitFor(`document.querySelectorAll('.draft-select-row').length===3`);

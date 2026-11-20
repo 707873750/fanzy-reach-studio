@@ -8,6 +8,7 @@ import type { CopyOptions, Draft, DraftPatch, Platform } from "../shared/types";
 import { applyCaptionPatch, canEditCopy } from "../shared/draft-copy";
 import { readPlatformDefaults } from "../shared/platform-defaults";
 import { canDeleteDraft, canDeletePublishRecord } from "../shared/draft-lifecycle";
+import { assertVideoCompatible, assertVideoCaption, groupMedia, isVideo } from "../shared/video-rules";
 
 const PLATFORM_URLS: Record<Platform, string> = {
   facebook: "https://www.facebook.com/",
@@ -35,6 +36,9 @@ export async function createDrafts(imageIds: string[], platforms: Platform[], co
   const store = getStore();
   const validIds = imageIds.filter((id) => store.images.some((image) => image.id === id));
   if (!validIds.length) throw new Error("所选图片已不存在");
+  const assets = [...new Set(validIds)].map(id => store.images.find(image => image.id === id)!);
+  // Validate the whole batch before adding any draft to the persistent store.
+  for (const platform of new Set(platforms)) for (const asset of assets) assertVideoCompatible(asset, platform);
 
   const created: Draft[] = [];
   const defaults = readPlatformDefaults(store.settings.platformDefaults);
@@ -51,13 +55,13 @@ export async function createDrafts(imageIds: string[], platforms: Platform[], co
   for (const platform of new Set(platforms)) {
     const config = defaults[platform];
     const size = config.imagesPerDraft;
-    for (let index = 0; index < validIds.length; index += size) {
-      const group = validIds.slice(index, index + size);
+    for (const group of groupMedia(assets, size)) {
       const now = new Date().toISOString();
       const draft: Draft = {
         id: crypto.randomUUID(),
         platform,
         imageIds: group,
+        mediaType: isVideo(assets.find(asset => asset.id === group[0])!) ? "video" : "image",
         title: config.title,
         tiktokPrivacy: platform === "tiktok" ? config.tiktokPrivacy : undefined,
         boardName: platform === "pinterest" ? config.boardName : undefined,
@@ -175,14 +179,29 @@ export async function prepareDraft(draftId: string, interactive = true) {
   if (!draft) throw new Error("未找到草稿");
   if (interactive && draft.status === "local_scheduled") throw new Error("请先取消本地定时，再准备手动发布素材");
   if (!draft.imageIds.length) throw new Error("草稿中没有图片");
+  const assets = draft.imageIds.map(id => { const asset = findImage(id); if (!asset) throw new Error("草稿中的素材已不存在"); return asset; });
+  const videoDraft = assets.some(isVideo);
+  if (videoDraft && assets.length !== 1) throw new Error("视频草稿只允许一个视频，不能混合图片");
+  if (videoDraft) assertVideoCaption(draft);
+  for (const asset of assets) assertVideoCompatible(asset, draft.platform);
 
   const outputFolder = path.join(getAppPaths().exports, draft.id);
   await fs.mkdir(outputFolder, { recursive: true });
   const size = PLATFORM_SIZES[draft.platform];
+  const files: string[] = [];
 
   for (let index = 0; index < draft.imageIds.length; index++) {
     const image = findImage(draft.imageIds[index]);
     if (!image) throw new Error(`未找到图片： ${draft.imageIds[index]}`);
+    if (isVideo(image)) {
+      const { inspectVideo } = await import("./video-service");
+      const metadata = await inspectVideo(image.originalPath);
+      assertVideoCompatible({ ...image, ...metadata, size: (await fs.stat(image.originalPath)).size }, draft.platform);
+      const target = path.join(outputFolder, "01-video.mp4");
+      await fs.copyFile(image.originalPath, target);
+      files.push(target);
+      continue;
+    }
     const outputName = `${String(index + 1).padStart(2, "0")}-${path.parse(image.fileName).name.replace(/[^\w-]/g, "_")}.jpg`;
     await sharp(image.originalPath)
       .rotate()
@@ -194,6 +213,7 @@ export async function prepareDraft(draftId: string, interactive = true) {
       .flatten({ background: "#ffffff" })
       .jpeg({ quality: 90, mozjpeg: true })
       .toFile(path.join(outputFolder, outputName));
+    files.push(path.join(outputFolder, outputName));
   }
 
   const captionText = [
@@ -230,7 +250,7 @@ export async function prepareDraft(draftId: string, interactive = true) {
     preparedFolder: outputFolder
   });
   await persistStore();
-  return { draft: updated, folder: outputFolder };
+  return { draft: updated, folder: outputFolder, files, mediaType: videoDraft ? "video" as const : "image" as const };
 }
 
 export async function markPublished(draftId: string, publishedUrl?: string) {

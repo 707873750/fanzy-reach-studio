@@ -33,6 +33,7 @@ const api = {
     ipcRenderer.invoke("images:list"),
   deleteImage: (id: string): Promise<void> =>
     ipcRenderer.invoke("images:delete", id),
+  previewMedia: (id: string): Promise<void> => ipcRenderer.invoke("images:preview", id),
   createDrafts: (ids: string[], platforms: Platform[], copy?: CopyOptions): Promise<Draft[]> =>
     ipcRenderer.invoke("drafts:create", ids, platforms, copy),
   listDrafts: (): Promise<Draft[]> =>

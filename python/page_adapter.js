@@ -77,7 +77,7 @@
     const started=Date.now();
     await trace('control.wait', '等待：'+label);
     try {
-      while(Date.now()<started+timeout) { checkAccount(); const value=find(); if(value) { await trace('control.ready', label+'已就绪（'+(Date.now()-started)+' ms）'); return value; } await pause(500); }
+      while(Date.now()<started+timeout) { checkAccount(); if(current?.platform==='tiktok'&&current.video&&!current.prepared) dismissTikTokVideoNotices(); const value=find(); if(value) { await trace('control.ready', label+'已就绪（'+(Date.now()-started)+' ms）'); return value; } await pause(500); }
       throw Error('未找到或未就绪：'+label+'。请检查登录、验证或平台页面变化');
     } catch(error) {
       const root=current?.composer?.isConnected?current.composer:document;
@@ -137,6 +137,18 @@
     await trace('pinterest.alt_text','已填写并核对替代文本（不记录正文）');
   }
   function caption(job,withTitle=true) { return [withTitle?job.title:'',job.caption,job.hashtags.join(' ')].filter(Boolean).join('\n\n'); }
+  function notificationPostUrl(platform) {
+    const patterns={
+      x:/^https:\/\/(?:www\.)?(?:x|twitter)\.com\/(?:i|[A-Za-z0-9_]+)\/status\/\d+\/?(?:[?#]|$)/,
+      instagram:/^https:\/\/(?:www\.)?instagram\.com\/(?:p|reel)\/[A-Za-z0-9_-]+\/?(?:[?#]|$)/,
+      tiktok:/^https:\/\/(?:www\.)?tiktok\.com\/@[A-Za-z0-9._-]+\/(?:video|photo)\/\d+\/?(?:[?#]|$)/
+    };
+    const pattern=patterns[platform];
+    if(!pattern||current.scheduleAt) return null;
+    const links=all('[data-testid="toast"] a[href],[role="status"] a[href],[role="alert"] a[href],[role="dialog"] a[href]').filter(node=>visible(node)&&!node.closest('[contenteditable="true"],article')&&!current.previousLinks?.has(node.href)&&pattern.test(node.href));
+    const urls=[...new Set(links.map(node=>node.href))];
+    return urls.length===1?urls[0]:null;
+  }
   function success(platform,root=document) {
     if(platform==='facebook') {
       const selector='[role="status"],[role="alert"]';
@@ -145,10 +157,18 @@
     if(current?.scheduleAt && ['instagram','pinterest'].includes(platform)) {
       return all('[role="status"],[role="alert"],h1,h2,h3,span,p',root).some(node=>visible(node)&&/^(?:(?:Your\s+)?(?:Pin|post|reel)\s+(?:has been\s+)?(?:successfully\s+)?scheduled|(?:你的)?(?:帖子|貼文|Pin\s*图|Pin\s*圖)已(?:排程|安排|定时)|已安排定时发布)[.!。！]?$/i.test(node.textContent.trim()));
     }
+    if(platform==='instagram') {
+      const selector='h1,h2,h3,[role="heading"],[role="status"],[role="alert"],span,p';
+      const nodes=[...(root.matches?.(selector)?[root]:[]),...all(selector,root)];
+      // The actual Chinese Reel completion screen says “你的 Reels 已分享。”.
+      // Match the completion message inside a dialog/notification, never the
+      // “分享了 Reels” heading or the same words in a feed post/caption editor.
+      if(nodes.some(node=>visible(node)&&node.closest('[role="dialog"],[aria-modal="true"],[role="status"],[role="alert"]')&&!node.closest('[contenteditable="true"],article')&&/^(?:你的\s*Reels?\s*已分享|已分享你的\s*Reels?)[.!。！]?$/i.test(node.textContent.trim()))) return true;
+    }
     if(platform==='bluesky') return Boolean(current?.confirmedUrl);
     if(platform==='tiktok') {
       const nodes=[...(root.nodeType===1?[root]:[]),...all('[role="status"],[role="alert"],h1,h2,h3,span,p,div',root)];
-      if(nodes.some(node=>visible(node)&&/^(Your (?:post|photos) (?:has|have) been published|Post published|已发布|发布成功)[.!。！]?$/i.test(node.textContent.trim()))) return true;
+      if(nodes.some(node=>visible(node)&&/^(Your (?:post|photos|video) (?:has|have) been published|Post published|已发布|发布成功)[.!。！]?$/i.test(node.textContent.trim()))) return true;
       if(!current?.submitted||location.pathname===current.uploadPath||current.control?.isConnected) return false;
       // A redirect alone is not proof. Require the submitted cover in a row
       // with an explicit platform review state, not an unrelated old post.
@@ -163,12 +183,19 @@
       });
     }
     if(platform==='x' && current.scheduleAt) return all('[data-testid="toast"]').some(node=>visible(node)&&/Your post (will be sent|was scheduled)|你的(帖子|推文)将于|你的(貼文|推文)將於|已排程|已安排定时/i.test(node.textContent));
-    const patterns={x:/^(Your post was sent\.?|你的帖子已发送[。！]?|你的推文已发送[。！]?)$/i,instagram:/^(Your post has been shared[.!]?|你的帖子已分享[。！]?|你的貼文已分享[。！]?|已分享你的貼文[。！]?)$/i,pinterest:/^(?:(?:Your\s+)?Pin\s+(?:has been\s+)?(?:successfully\s+)?published|(?:你[的]?\s*)?Pin\s*(?:图|圖)?\s*(?:已成功发布|已發佈|已發布|已发布|发布成功|發佈成功|發布成功))[.!。！]?$/i};
+    const patterns={x:/^(Your post was sent\.?|你的帖子已发送[。！]?|你的推文已发送[。！]?)$/i,instagram:/^(Your (?:post|reel) has been shared[.!]?|你的帖子已分享[。！]?|你的貼文已分享[。！]?|已分享你的貼文[。！]?)$/i,pinterest:/^(?:(?:Your\s+)?Pin\s+(?:has been\s+)?(?:successfully\s+)?published|(?:你[的]?\s*)?Pin\s*(?:图|圖)?\s*(?:已成功发布|已發佈|已發布|已发布|发布成功|發佈成功|發布成功))[.!。！]?$/i};
     const selector=platform==='x'?'[data-testid="toast"] *,[data-testid="toast"]':'h1,h2,h3,[role="status"],[role="alert"],span,p';
     return [...(root.matches?.(selector)?[root]:[]),...all(selector,root)].some(node=>visible(node)&&patterns[platform].test(node.textContent.trim()));
   }
   async function upload(selector, root=document) {
     const input=await wait(()=>unique(all(selector,root).filter(node=>!node.disabled&&!node.closest('[aria-hidden="true"],[inert]')),'图片上传控件'),'图片上传控件');
+    if(current.video) {
+      all('[data-fanzy-native-upload]').forEach(node=>node.removeAttribute('data-fanzy-native-upload'));
+      input.setAttribute('data-fanzy-native-upload','true');
+      await globalThis.fanzyUploadVideo();
+      await trace('video.attached','视频已交给平台原生上传控件，等待处理');
+      return;
+    }
     await trace('images.upload',`上传 ${current.files.length} 张图片到平台页面`);
     const transfer=new DataTransfer(); current.files.forEach(file=>transfer.items.add(file));
     input.files=transfer.files;
@@ -189,6 +216,52 @@
       return node;
     }
     return findButton(platform==='instagram'?/^(Share|分享)$/i:/^(Publish|发布)$/i);
+  }
+  function dismissTikTokVideoNotices() {
+    // Decline only the observed optional settings prompt. Do not change the
+    // existing copyright/content-check switches or acknowledge review errors.
+    const prompts=[
+      [/^(开启自动内容检查？|Turn on automatic content checks\?)$/i,/^(Cancel|取消)$/i],
+      [/^现在，创作专业又吸睛的视频变得前所未有地轻松简单。$/,/^(Got it|知道了)$/i]
+    ];
+    for(const [heading,button] of prompts) {
+      const title=unique(all('span,p,div,h2').filter(node=>visible(node)&&!node.children.length&&heading.test(node.textContent.trim())),'TikTok 首次使用说明');
+      if(!title) continue;
+      let root=title.parentElement;
+      for(let i=0;i<6&&root&&root!==document.body;i++,root=root.parentElement) {
+        const control=unique(all('button,[role="button"]',root).filter(node=>visible(node)&&button.test(name(node).trim())),'TikTok 说明关闭按钮');
+        if(control&&!control.disabled&&control.getAttribute('aria-disabled')!=='true') {control.click();break;}
+      }
+    }
+  }
+  async function videoReady(root=controlsRoot()) {
+    await wait(()=>{
+      if(current.platform==='instagram') {
+        // First video upload opens an informational modal over the crop dialog.
+        const notices=all('[role="dialog"],[aria-modal="true"]').filter(node=>visible(node)&&all('h1,h2,h3,[role="heading"]',node).some(heading=>/^(视频帖现在会以 Reels 的形式分享|Video posts are now shared as reels)[.!。！]?$/i.test(heading.textContent.trim())));
+        const notice=unique(notices.filter(node=>!notices.some(other=>other!==node&&node.contains(other))),'Instagram Reels 说明');
+        if(notice) {
+          const ok=unique(all('button,[role="button"]',notice).filter(node=>visible(node)&&/^(OK|确定|確定)$/i.test(name(node).trim())),'Reels 说明确认');
+          if(ok&&!ok.disabled&&ok.getAttribute('aria-disabled')!=='true') ok.click();
+          return false;
+        }
+      }
+      const error=all('[role="alert"]',root).find(node=>visible(node)&&/upload failed|unsupported|too (?:large|long)|could not|上传失败|不支持|超出|超過|超过/i.test(node.textContent));
+      if(error) throw Error('平台拒绝视频：'+error.textContent.trim().slice(0,300));
+      // Player seek bars and X's character meter remain mounted after upload.
+      // Only upload/processing progress blocks preview readiness; the final
+      // submit control must independently become enabled before checkpointing.
+      if(all('[role="progressbar"],[aria-busy="true"]',root).some(node=>visible(node)&&/upload|processing|上传|上傳|处理|處理/i.test(name(node)))) return false;
+      const preview=all('video',root).some(node=>visible(node)&&node.readyState>=1&&node.videoWidth>0&&current.previousVideos.get(node)!==(node.currentSrc||node.src));
+      if(current.platform==='tiktok') {
+        const labels=all('span,p,div',root).filter(node=>visible(node)&&!node.children.length).map(node=>node.textContent.trim());
+        const uploaded=labels.includes(current.videoName)&&labels.some(text=>/^(已上传|Uploaded)\s*[（(][\d.]+\s*(?:KB|MB|GB)[）)]$/i.test(text));
+        const editor=findField(/^(Description|Caption|视频描述|描述|说明)$/i)||unique(all('[contenteditable="true"][role="combobox"]',root).filter(visible),'TikTok 视频描述');
+        // Studio may replace the video element with a cover after processing.
+        return Boolean(editor&&(uploaded||preview));
+      }
+      return preview;
+    },'视频预览及上传处理完成',600000);
   }
   async function scheduleX(iso) {
     const date=new Date(iso);
@@ -260,7 +333,7 @@
     if(location.protocol!=='https:'||location.hostname!==hosts[job.platform]) throw Error('当前页面不是指定平台');
     if(phase==='begin') {
       if(current && current.id!==job.id) throw Error('该标签页已有任务');
-      current={id:job.id,platform:job.platform,files:[],prepared:false,submitted:false};await trace('page.begin','Playwright 页面发布任务初始化');return;
+      current={id:job.id,platform:job.platform,video:job.mediaType==='video',videoName:job.files?.[0]?.split(/[\\/]/).pop(),files:[],prepared:false,submitted:false};await trace('page.begin','Playwright 页面发布任务初始化');return;
     }
     if(phase==='confirm_pinterest') {
       if(current?.platform==='pinterest'&&current.submitted&&/^https:\/\/www\.pinterest\.com\/pin\/\d+\/$/.test(extra?.url||'')) current.confirmedUrl=extra.url;
@@ -274,6 +347,15 @@
       if(current?.platform==='tiktok'&&current.submitted) current.confirmedTikTok=true;
       return;
     }
+    if(phase==='confirm_facebook') {
+      if(current?.platform==='facebook'&&current.submitted) current.confirmedFacebook=true;
+      return;
+    }
+    if(phase==='confirm_post_url') {
+      const valid=job.platform==='x'?/^https:\/\/x\.com\/i\/status\/\d+$/.test(extra?.url||''):job.platform==='instagram'&&/^https:\/\/www\.instagram\.com\/(p|reel)\/[A-Za-z0-9_-]+\/$/.test(extra?.url||'');
+      if(current?.platform===job.platform&&current.submitted&&!current.scheduleAt&&valid) current.confirmedUrl=extra.url;
+      return;
+    }
     if(!current||current.id!==job.id) throw Error('任务上下文已丢失');
     if(phase==='instagram_open_state') {
       if(job.platform!=='instagram') throw Error('非 Instagram 任务');
@@ -285,7 +367,9 @@
       current.files.push(new File([bytes],extra.name,{type:extra.type}));return;
     }
     if(phase==='prepare') {
-      if(current.prepared||current.submitted||current.files.length!==job.fileCount) throw Error('任务阶段或图片数量错误');
+      if(current.prepared||current.submitted||(!current.video&&current.files.length!==job.fileCount)||(current.video&&job.fileCount!==1)) throw Error('任务阶段或素材数量错误');
+      if(current.video&&job.altText) throw Error('视频不使用图片替代文本，请清空替代文本后发布');
+      if(current.video) current.previousVideos=new Map(all('video').map(node=>[node,node.currentSrc||node.src]));
       if(job.platform==='facebook') {
         if(job.nativeScheduledAt) throw Error('Facebook 请使用本地定时发布');
         if(job.altText) throw Error('Facebook 暂不支持自动填写替代文本，请清空替代文本后重试，或手动发布');
@@ -298,10 +382,11 @@
         editor.setAttribute('data-fanzy-facebook-editor','true');
         await globalThis.fanzyFacebookInput();
         await wait(()=>editor.innerText.replace(/\r\n/g,'\n').trim()===caption(job).trim(),'Facebook 文案确认');
-        const fileSelector='input[type="file"][accept*="image"]';
+        const fileSelector=current.video?'input[type="file"][accept*="video"]':'input[type="file"][accept*="image"]';
         if(!all(fileSelector,current.composer).length) await click(/^(Photo\/video|Photo\/Video|照片\/视频|照片／视频|相片\/影片|相片／影片)$/i);
         await upload(fileSelector,current.composer);
-        await wait(()=>{
+        if(current.video) await videoReady(current.composer);
+        else await wait(()=>{
           const previews=all('img',current.composer).filter(img=>visible(img)&&/^(blob:|data:)/.test(img.src)&&img.complete&&img.naturalWidth>0);
           const removing=all('button,[role="button"]',current.composer).filter(node=>visible(node)&&/^(Remove photo|Remove image|移除照片|删除照片|移除相片)/i.test(name(node)));
           return (previews.length===job.fileCount||removing.length===job.fileCount)&&!all('[role="progressbar"],[aria-busy="true"]',current.composer).some(visible);
@@ -321,7 +406,8 @@
         await globalThis.fanzyBlueskyInput('text');
         await wait(()=>editor.innerText.replace(/\r\n/g,'\n').trim()===text.trim(),'Bluesky 文案填写确认');
         await globalThis.fanzyBlueskyInput('images');
-        await wait(()=>all('[data-testid="selectedPhotosView"] [data-testid="removePhotoButton"]',current.composer).filter(visible).length===job.fileCount,'Bluesky 图片数量确认');
+        if(current.video) await videoReady(current.composer);
+        else await wait(()=>all('[data-testid="selectedPhotosView"] [data-testid="removePhotoButton"]',current.composer).filter(visible).length===job.fileCount,'Bluesky 图片数量确认');
         if(job.altText) await globalThis.fanzyBlueskyInput('alt');
       } else if(job.platform==='x') {
         const composer=await wait(selectXComposer,'X 发帖窗口');
@@ -329,8 +415,9 @@
         await trace('composer.selected','已锁定当前 X 发帖窗口');
         await fill(composer.editor,caption(job));
         await upload('input[data-testid="fileInput"]',current.composer);
-        await wait(()=>xPhotoPreviews().length===job.fileCount,'发帖窗口内的图片预览');
-        await trace('images.preview_ready','已确认发帖窗口内 '+job.fileCount+' 张图片预览');
+        if(current.video) await videoReady(current.composer);
+        else await wait(()=>xPhotoPreviews().length===job.fileCount,'发帖窗口内的图片预览');
+        await trace(current.video?'video.preview_ready':'images.preview_ready',current.video?'已确认发帖窗口内的视频预览':'已确认发帖窗口内 '+job.fileCount+' 张图片预览');
         if(job.altText) {
           for(let index=0;index<job.fileCount;index++) {
             const descriptions=xAll('button,[role="button"]').filter(node=>visible(node)&&/^(Add description|Add alt text|添加描述|添加替代文本)$/i.test(name(node).trim()));
@@ -342,6 +429,7 @@
       } else if(job.platform==='instagram') {
         if(instagramOpenState()!=='open') throw Error('Instagram 上传弹窗尚未确认打开，禁止上传');
         await upload('input[type="file"]',current.composer);
+        if(current.video) await videoReady(current.composer);
         const nextStep=/^(Next|Continue|下一步|继续|繼續)$/i;
         await trace('instagram.crop','图片已交给平台，等待裁剪页面的继续按钮');
         await click(nextStep); await pause(700);
@@ -370,6 +458,12 @@
           await trace('instagram.alt_text','已填写并核对 '+fields.length+' 个图片替代文本字段（不记录正文）');
         }
       } else if(job.platform==='tiktok') {
+        if(current.video) {
+          const input=await wait(()=>unique(all('input[type="file"]').filter(node=>!node.disabled&&/video\/|\.mp4/i.test(node.accept)),'TikTok 视频上传入口'),'TikTok 视频上传入口');
+          input.setAttribute('data-fanzy-video-input','true');
+          await upload('input[data-fanzy-video-input="true"]');
+          await videoReady();
+        } else {
         const imageInput=()=>unique(all('input[type="file"]').filter(node=>!node.disabled&&!node.closest('[aria-hidden="true"],[inert]')&&/(image\/|\.(?:jpe?g|png|webp)(?:,|$))/i.test(node.accept)), 'TikTok 图片上传控件');
         let photoModeClicked=false;
         let input;
@@ -400,7 +494,8 @@
           if(counts.length) return counts.every(match=>Number(match[1])===job.fileCount);
           return all('img').filter(node=>visible(node)&&/^(blob:|data:image\/)/i.test(node.currentSrc||node.src)).length===job.fileCount;
         },'TikTok 全部图片预览');
-        if(job.title) {
+        }
+        if(job.title && !current.video) {
           const title=await wait(()=>findField(/^(Title|Add title|Add a title|标题|添加标题|添加一个吸睛标题)$/i),'TikTok 标题');
           title.setAttribute('data-fanzy-native-field','title');
           await globalThis.fanzyTikTokInput('title');
@@ -413,12 +508,12 @@
           if(all('h1,h2,h3,[role="heading"]').some(node=>visible(node)&&/^(出错了|Something went wrong)[.!！。]?$/i.test(node.textContent.trim()))) throw Error('TikTok 编辑页面显示“出错了”，已停止，未点击发布');
           const node=findDescription();
           const normalize=text=>text.replace(/\r\n/g,'\n').replace(/\u00a0/g,' ');
-          if(node?.isContentEditable&&caption(job,false)==='') {
+          if(node?.isContentEditable&&caption(job,current.video)==='') {
             // Empty rich editors retain BR blocks or zero-width caret sentinels.
             // Do not treat these as user copy, but never accept real text as empty.
             return (node.textContent||'').replace(/[\r\n\u200b\ufeff]/g,'')==='';
           }
-          return node&&normalize(node.isContentEditable?node.innerText:node.value)===normalize(caption(job,false));
+          return node&&normalize(node.isContentEditable?node.innerText:node.value)===normalize(caption(job,current.video));
         },'TikTok 描述填写确认');
         if(job.altText) {
           const fields=all('input,textarea').filter(node=>visible(node)&&/(Alt text|替代文本|替代文字)/i.test(name(node)));
@@ -446,12 +541,13 @@
           await wait(current.checkPrivacy,'TikTok 隐私设置确认');
           await trace('tiktok.privacy_verified',job.tiktokPrivacy==='public'?'已确认：所有人可见':'已确认：仅自己可见');
         }
-        await trace('tiktok.photos_ready','已核对图片数量与描述，等待提交检查点');
+        await trace(current.video?'tiktok.video_ready':'tiktok.photos_ready',current.video?'已核对视频上传与描述，等待提交检查点':'已核对图片数量与描述，等待提交检查点');
         current.uploadPath=location.pathname;
         current.photoSources=all('img').filter(node=>visible(node)&&node.width>=80&&node.height>=80).map(node=>node.currentSrc||node.src);
       } else {
         if(!job.boardName.trim()) throw Error('请填写 Pinterest 画板名称');
         await upload('input[type="file"]');
+        if(current.video) await videoReady();
         await trace('pinterest.title','等待 Pinterest 标题字段');
         await field(/^(Title|Add your title|标题|添加标题|简要描述你的\s*Pin\s*图)$/i,job.title);
         await trace('pinterest.description','等待 Pinterest 描述字段');
@@ -492,7 +588,10 @@
         if(!await scheduleNative(job.nativeScheduledAt)) return {state:'local_scheduled',message:'当前发布页面没有可用的原生排程控件，已转为本地定时；尚未提交帖子'};
       }
       current.control=await wait(()=>finalButton(job.platform),'发布按钮');
-      await wait(()=>!current.control.disabled&&current.control.getAttribute('aria-disabled')!=='true','发布按钮可用');
+      current.control=await wait(()=>{
+        const control=finalButton(job.platform);
+        return control&&visible(control)&&!control.disabled&&control.getAttribute('aria-disabled')!=='true'?control:null;
+      },'发布按钮可用',current.video?600000:20000);
       if(success(job.platform)) throw Error('发现旧的发布成功提示，无法确认本次结果');
       current.prepared=true; current.files=[];return;
     }
@@ -505,24 +604,26 @@
       const control=finalButton(job.platform);
       if(control!==current.control||!visible(control)||control.disabled||control.getAttribute('aria-disabled')==='true'||success(job.platform)) throw Error('提交前页面发生变化');
       await trace('submit.click',current.scheduleAt?'点击最终排程按钮':'点击最终发布按钮');
+      current.previousLinks=new Set(all('a[href]').map(node=>node.href));
       let observed=false;
-      const capture=()=>{if(success(job.platform)) observed=true;};
+      let observedUrl=null;
+      const capture=()=>{if(success(job.platform)) {observed=true; observedUrl=notificationPostUrl(job.platform)||observedUrl;}};
       const observer=new MutationObserver(records=>{
         if(observed) return;
         for(const record of records) {
           const nodes=record.type==='childList'?[...record.addedNodes]:[record.target];
-          if(nodes.some(node=>{const root=node.nodeType===Node.ELEMENT_NODE?node:node.parentElement;return root&&success(job.platform,root);})) {observed=true;break;}
+          if(nodes.some(node=>{const root=node.nodeType===Node.ELEMENT_NODE?node:node.parentElement;return root&&success(job.platform,root);})) {observed=true;observedUrl=notificationPostUrl(job.platform)||observedUrl;break;}
         }
       });
-      if(['facebook','pinterest','tiktok'].includes(job.platform)) observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['hidden','style','class','aria-hidden']});
+      if(['facebook','instagram','x','pinterest','tiktok'].includes(job.platform)) observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['hidden','style','class','aria-hidden']});
       try {
         current.submitted=true;control.click();capture();
         await trace('control.wait',current.scheduleAt?'等待：平台排程成功确认':'等待：平台发布成功确认');
         const deadline=Date.now()+45000;
         while(Date.now()<deadline) {
-          if(observed||current.confirmedUrl||current.confirmedTikTok||success(job.platform)) {
+          if(observed||current.confirmedUrl||current.confirmedTikTok||current.confirmedFacebook||success(job.platform)) {
             await trace('submit.success',current.confirmedUrl?'平台已返回本次发布的帖子链接':current.scheduleAt?'平台已确认排程：'+current.scheduleAt:'平台发布成功确认已出现');
-            return {state:'succeeded',url:current.confirmedUrl||(job.platform==='facebook'?null:location.href)};
+            return {state:'succeeded',url:current.confirmedUrl||observedUrl||notificationPostUrl(job.platform)||null};
           }
           await pause(250);
         }

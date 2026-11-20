@@ -9,21 +9,24 @@ const lifecycleSource = await fs.readFile('src/shared/draft-lifecycle.ts','utf8'
 const lifecycleCompiled = ts.transpileModule(lifecycleSource, {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText;
 const lifecycle = await import('data:text/javascript;base64,' + Buffer.from(lifecycleCompiled).toString('base64'));
 const image = {id:'image', fileName:'source.jpg', originalPath:'/library/assets/image.jpg', thumbnailPath:'/library/thumbnails/image.webp'};
-let data, removed, saved, failure;
+let data, removed, saved, failure, lockCode, lockAttempts, attempts, waits;
 const sandbox = {exports:{}, require:name => {
   if (name === './store') return {getStore:()=>data, persistStore:async()=>{saved=JSON.stringify(data);}};
   if (name === '../shared/draft-lifecycle') return lifecycle;
+  if (name === 'node:timers/promises') return {setTimeout:async ms=>{waits.push(ms);}};
   if (name === 'node:fs/promises') return {rm:async (file, options)=>{
     assert.equal(options.force, true);
+    attempts.push(file);
+    if (file === image.originalPath && lockAttempts-- > 0) throw Object.assign(Error('locked'), {code:lockCode});
     if (file === failure) throw Error('Access denied');
     removed.push(file);
   }};
-  if (name === 'sharp') return ()=>{};
+  if (name === 'sharp') return Object.assign(()=>{}, {cache:value=>assert.equal(value,false)});
   return nativeRequire(name);
 }};
 const compiled = ts.transpileModule(await fs.readFile('src/main/image-service.ts','utf8'), {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText;
 vm.runInNewContext(compiled, sandbox);
-const reset = drafts => {data={images:[{...image}],drafts};removed=[];saved=null;failure=null;};
+const reset = drafts => {data={images:[{...image}],drafts};removed=[];saved=null;failure=null;lockCode='EBUSY';lockAttempts=0;attempts=[];waits=[];};
 for (const status of ['draft','ready','prepared','scheduled','reminder_due']) {
   reset([{id:'task',imageIds:['image'],status}]);
   await assert.rejects(sandbox.exports.deleteImage('image'), /未完成的草稿/);
@@ -57,6 +60,7 @@ failure=image.originalPath;
 await assert.rejects(sandbox.exports.deleteImage('image'), /Access denied/);
 assert.equal(data.images.length,1,'failed file removal keeps the library record available for retry');
 assert.equal(saved,null);
+assert.equal(removed.length,0,'a locked original must not lose its thumbnail');
 failure=null;
 await sandbox.exports.deleteImage('image');
 assert.equal(data.images.length,0);
@@ -64,4 +68,26 @@ reset([]);
 await sandbox.exports.deleteImage('missing');
 assert.equal(removed.length,0);
 assert.equal(data.images.length,1);
+for (const code of ['EBUSY','EPERM','EACCES']) {
+  reset([]);
+  lockCode=code; lockAttempts=2;
+  await sandbox.exports.deleteImage('image');
+  assert.equal(data.images.length,0);
+  assert.deepEqual(waits,[150,300]);
+  assert.deepEqual(removed,[image.originalPath,image.thumbnailPath]);
+}
+reset([]);
+lockAttempts=10;
+await assert.rejects(sandbox.exports.deleteImage('image'), /图片文件仍被占用/);
+assert.equal(attempts.length,4,'persistent locks have bounded retries');
+assert.equal(data.images.length,1);
+assert.equal(saved,null);
+assert.equal(removed.length,0);
+reset([]);
+failure=image.thumbnailPath;
+await assert.rejects(sandbox.exports.deleteImage('image'), /Access denied/);
+assert.equal(data.images.length,1);
+failure=null;
+await sandbox.exports.deleteImage('image');
+assert.equal(data.images.length,0,'partial deletions can be retried');
 console.log('PASS: occupied asset protection, library-only file deletion, preserved history, failed removal retry and stale IDs');

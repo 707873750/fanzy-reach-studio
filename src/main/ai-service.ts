@@ -72,6 +72,7 @@ export async function generateCaption(draftId: string, sharedIds?: string[]): Pr
   const imageIds = sharedDrafts ? [...new Set(sharedDrafts.flatMap(({item}) => item.imageIds))] : draft.imageIds;
   if (imageIds.length > 35) throw new Error("统一生成每次最多使用 35 张不同图片，请减少所选草稿");
   const apiKey = await getApiKey();
+  const hasVideo = imageIds.some(id => findImage(id)?.mimeType?.startsWith("video/"));
 
   const imageParts: Array<{ type: "text" | "image_url"; text?: string; image_url?: { url: string; detail: "low" } }> = [
     { type: "text", text: sharedDrafts ? `Write one concise natural English social media caption suitable for all these platforms: ${[...new Set(sharedDrafts.map(({item}) => item.platform))].join(', ')}. Base it only on visible facts in the attached images. Do not invent claims. Keep it under 240 characters. Return JSON with caption (nonempty string), title (empty string), hashtags (empty array), alt_text (empty string).` : promptFor(draft.platform, draft.imageIds.length) }
@@ -80,7 +81,7 @@ export async function generateCaption(draftId: string, sharedIds?: string[]): Pr
   for (const imageId of imageIds) {
     const image = findImage(imageId);
     if (!image) throw new Error("草稿中的图片已不存在");
-    const bytes = await sharp(image.originalPath)
+    const bytes = await sharp(image.mimeType?.startsWith("video/") ? image.thumbnailPath : image.originalPath)
       .rotate()
       .resize(768, 768, { fit: "inside", withoutEnlargement: true })
       .jpeg({ quality: 72 })
@@ -93,6 +94,7 @@ export async function generateCaption(draftId: string, sharedIds?: string[]): Pr
   }
 
   const controller = new AbortController();
+  if (hasVideo) imageParts[0].text += " Some images are video cover frames only. Do not infer motion, events, speech or audio beyond the visible still frame. Return an empty alt_text for video.";
   const timeout = setTimeout(() => controller.abort(), 120_000);
   try {
     const response = await fetch("https://api.deepseek.com/chat/completions", {
@@ -170,7 +172,7 @@ export async function generateCaption(draftId: string, sharedIds?: string[]): Pr
       captionHtml: undefined, independentCaptionHtml: undefined,
       independentCaption: parsed.caption || "",
       hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : [],
-      altText: parsed.alt_text || "",
+      altText: hasVideo ? "" : parsed.alt_text || "",
       status: "ready"
     });
     await persistStore();

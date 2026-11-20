@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { BrowserWindow } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import fs from "node:fs/promises";
@@ -6,6 +6,7 @@ import path from "node:path";
 import { findDraft, getAppPaths, getStore, persistStore, updateDraftRecord } from "./store";
 import { prepareDraft } from "./draft-service";
 import type { BrowserSettings, Draft, Platform } from "../shared/types";
+import { postUrl } from "../shared/post-url";
 
 import { log, errorDetail } from "./run-logger";
 import { setPerformancePublishing } from "./performance-monitor";
@@ -46,6 +47,7 @@ async function record(id: string, state: NonNullable<Draft["browserPublish"]>["s
 }
 
 function createPlatformClient() {
+  let intentionallyStopping = false;
   let worker: ChildProcessWithoutNullStreams | undefined;
   let pending: { resolve: (r: Result) => void; reject: (e: Error) => void; checkpoint: () => Promise<void> } | undefined;
   function getWorker() {
@@ -60,7 +62,7 @@ function createPlatformClient() {
     const fail = () => {
       if (worker !== child) return;
       worker = undefined;
-      pending?.reject(new Error(app.isPackaged ? "内置发布组件已停止，请查看运行日志，必要时重新安装完整版本。" : "Python 发布进程已停止，请检查 Python 和 Playwright 安装，必要时通过 FANZY_PYTHON 设置解释器路径。"));
+      pending?.reject(new Error(intentionallyStopping ? "应用正在退出，发布任务已中断。请核对任务状态后再重试。" : "发布进程意外停止，请查看运行日志中的具体错误后重试。"));
       pending = undefined;
     };
     child.on("error", error => { void log({ source: "app", level: "error", step: "python.spawn_failed", message: "Python 启动失败", detail: errorDetail(error) }); fail(); });
@@ -100,7 +102,7 @@ function createPlatformClient() {
     return child;
   }
 
-  async function request(payload: object, checkpoint = async () => {}) {
+  async function request(payload: { mediaType?: unknown; [key: string]: unknown }, checkpoint = async () => {}) {
     const child = getWorker();
     return new Promise<Result>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -109,7 +111,7 @@ function createPlatformClient() {
         child.kill();
         void log({ source: "app", level: "error", step: "task.timeout", message: "等待浏览器或 Python 超时，已终止发布进程" });
         reject(new Error("浏览器发布超时，重试前请核对平台和任务状态。"));
-      }, 240_000);
+      }, payload.mediaType === "video" ? 960_000 : 240_000);
       pending = {
         resolve: (result) => { clearTimeout(timer); resolve(result); },
         reject: (error) => { clearTimeout(timer); reject(error); }, checkpoint
@@ -119,6 +121,7 @@ function createPlatformClient() {
   }
 
   async function stop() {
+    intentionallyStopping = true;
     const child = worker;
     if (!child || child.exitCode !== null) return;
     await new Promise<void>(resolve => {
@@ -196,12 +199,11 @@ export async function publishDrafts(ids: string[], localDue = false) {
           const nativeScheduledAt = !localDue ? publishAt : null;
           updateDraftRecord(draft.id, {scheduleMode: nativeScheduledAt ? "native" : localDue ? "local" : null});
           if (localDue) updateDraftRecord(draft.id, {status:"ready"});
-          await record(draft.id, "running", "正在准备图片并打开平台…");
-          const { folder } = await prepareDraft(draft.id, false);
-          void log({ source: "app", level: "info", step: "images.prepared", message: `已准备 ${draft.imageIds.length} 张平台图片`, draftId: draft.id, platform: draft.platform });
-          const files = (await fs.readdir(folder)).filter((file) => /^\d+-.*\.jpg$/.test(file)).sort().map((file) => path.join(folder, file));
-          if (files.length !== draft.imageIds.length) throw new Error("已准备的图片数量与草稿不一致");
-          const result = await request({ action: "publish", ...draft, xScheduledAt: draft.platform === "x" ? nativeScheduledAt : null, nativeScheduledAt, files, ...browserOptions() }, async () => {
+          await record(draft.id, "running", "正在准备素材并打开平台…");
+          const { files, mediaType } = await prepareDraft(draft.id, false);
+          void log({ source: "app", level: "info", step: "images.prepared", message: `已准备 ${draft.imageIds.length} 项平台素材`, draftId: draft.id, platform: draft.platform });
+          if (files.length !== draft.imageIds.length) throw new Error("已准备的素材数量与草稿不一致");
+          const result = await request({ action: "publish", ...draft, mediaType, xScheduledAt: draft.platform === "x" ? nativeScheduledAt : null, nativeScheduledAt, files, ...browserOptions() }, async () => {
             submittedAt = new Date().toISOString();
             await record(draft.id, "uncertain", "正在提交，确认结果前请勿重试。", submittedAt);
           });
@@ -210,7 +212,7 @@ export async function publishDrafts(ids: string[], localDue = false) {
             await persistStore(); notify(draft);
             void log({source:"app",level:"info",step:"schedule.local",message:result.message || "无可用原生排程，已转为本地定时",draftId:draft.id,platform:draft.platform});
           } else if (result.state === "succeeded") {
-            updateDraftRecord(draft.id, { status: nativeScheduledAt ? "platform_scheduled" : "published", publishedUrl: result.url || null });
+            updateDraftRecord(draft.id, { status: nativeScheduledAt ? "platform_scheduled" : "published", publishedUrl: nativeScheduledAt ? null : postUrl(draft.platform, result.url) });
             await record(draft.id, nativeScheduledAt ? "scheduled" : "succeeded", result.message || "发布成功", submittedAt);
           } else {
             await record(draft.id, submittedAt ? "uncertain" : "needs_attention", result.message || "请检查浏览器页面", submittedAt);

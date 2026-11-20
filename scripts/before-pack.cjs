@@ -13,4 +13,7 @@ module.exports = async context => {
   if (!fs.existsSync(binary) || !fs.existsSync(path.join(base, 'build-info.json'))) {
     throw new Error(`Missing bundled publisher for ${platform}-${arch}. Run npm run build:publisher first.`);
   }
+  for (const tool of [require('ffmpeg-static'), require('ffprobe-static').path]) {
+    if (!tool || !fs.existsSync(tool)) throw new Error('Missing bundled video tools. Reinstall npm dependencies on the target OS and architecture.');
+  }
 };

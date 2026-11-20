@@ -17,6 +17,8 @@ from performance_stats import system_sample
 from pinterest_confirmation import PinterestConfirmation
 from tiktok_confirmation import TikTokConfirmation
 from bluesky_confirmation import BlueskyConfirmation
+from facebook_confirmation import FacebookConfirmation
+from submission_links import SubmissionLinks
 
 ADAPTER_PATH = Path(__file__).with_name('page_adapter.js')
 CHANNELS = ('msedge', 'chrome', 'chromium')
@@ -206,10 +208,14 @@ class Publisher:
                 page = context.pages[0] if context.pages else await context.new_page()
                 if job['platform'] == 'bluesky':
                     confirmation = BlueskyConfirmation(page, job)
+                elif job['platform'] == 'facebook':
+                    confirmation = FacebookConfirmation(page, job, lambda detail: self.log('facebook.confirmation_response', '本次创建帖子的响应结构（不记录正文或凭据）', job, detail=detail))
                 elif job['platform'] == 'pinterest' and not job.get('nativeScheduledAt'):
                     confirmation = PinterestConfirmation(page)
                 elif job['platform'] == 'tiktok':
                     confirmation = TikTokConfirmation(page, lambda detail: self.log('tiktok.confirmation_response', '本次提交后的响应结构（不记录正文、凭据或查询参数）', job, detail=detail))
+                elif job['platform'] in ('instagram', 'x') and not (job.get('nativeScheduledAt') or job.get('xScheduledAt')):
+                    confirmation = SubmissionLinks(page, job)
                 monitor = asyncio.create_task(self.monitor_page(page, job))
                 page.on('pageerror', lambda error: self.log('page.error', '平台页面脚本异常', job, 'error', str(error)))
                 page.on('requestfailed', lambda req: self.log('network.failed', '网络请求失败：'+urlsplit(req.url).netloc, job, 'warn', req.failure))
@@ -219,6 +225,15 @@ class Publisher:
                     self.log(str(entry.get('step', 'page.event')), str(entry.get('message', '')), job,
                              entry.get('level', 'info'), entry.get('detail'), source='page')
                 await page.expose_binding('fanzyTrace', trace)
+                if job.get('mediaType') == 'video':
+                    async def upload_video(source):
+                        if source['frame'] != page.main_frame or checkpoint_requested or urlsplit(page.url).netloc != urlsplit(URLS[job['platform']]).netloc:
+                            raise ValueError('Invalid video upload phase')
+                        control = page.locator('input[data-fanzy-native-upload="true"]')
+                        if await control.count() != 1:
+                            raise ValueError('视频上传控件已变化')
+                        await control.set_input_files(job['files'], timeout=60000)
+                    await page.expose_binding('fanzyUploadVideo', upload_video)
                 if job['platform'] == 'bluesky':
                     async def bluesky_input(source, action):
                         if source['frame'] != page.main_frame or checkpoint_requested:
@@ -226,10 +241,20 @@ class Publisher:
                         root = page.locator('[data-testid="composePostView"]')
                         if action == 'text':
                             editor = root.locator('[contenteditable="true"]')
-                            await editor.fill(confirmation.expected)
+                            await editor.click()
+                            await editor.press('ControlOrMeta+A')
+                            await editor.press('Backspace')
+                            for index, line in enumerate(confirmation.expected.replace('\r\n', '\n').split('\n')):
+                                if index:
+                                    await editor.press('Shift+Enter')
+                                if line:
+                                    await page.keyboard.insert_text(line)
                         elif action == 'images':
                             async with page.expect_file_chooser(timeout=15000) as chooser:
-                                await root.locator('[data-testid="openMediaBtn"], [data-testid="openGalleryBtn"]').click()
+                                selector = '[data-testid="openVideoBtn"]' if job.get('mediaType') == 'video' else '[data-testid="openMediaBtn"], [data-testid="openGalleryBtn"]'
+                                if job.get('mediaType') == 'video' and not await root.locator(selector).count():
+                                    selector = '[data-testid="openMediaBtn"], [data-testid="openGalleryBtn"]'
+                                await root.locator(selector).click()
                             await (await chooser.value).set_files(job['files'])
                         elif action == 'alt' and job.get('altText'):
                             for index in range(job['fileCount']):
@@ -245,7 +270,7 @@ class Publisher:
                     async def type_tiktok(source, field):
                         if source['frame'] != page.main_frame or checkpoint_requested or field not in ('title', 'description'):
                             raise ValueError('Invalid TikTok input phase')
-                        text = job.get('title', '') if field == 'title' else '\n\n'.join(part for part in [job.get('caption', ''), ' '.join(job['hashtags'])] if part)
+                        text = job.get('title', '') if field == 'title' else '\n\n'.join(part for part in [job.get('title', '') if job.get('mediaType') == 'video' else '', job.get('caption', ''), ' '.join(job['hashtags'])] if part)
                         control = page.locator('[data-fanzy-native-field="'+field+'"]')
                         if await control.count() != 1:
                             raise ValueError('TikTok 输入框已变化')
@@ -292,8 +317,9 @@ class Publisher:
                     await self.open_instagram_composer(page, job, phase)
                 for index, file in enumerate(request['files']):
                     path = Path(file)
-                    self.log('asset.load', f'读取图片 {index+1}/{job["fileCount"]}', job)
-                    await phase('asset', {'name': path.name, 'type': 'image/jpeg', 'data': base64.b64encode(path.read_bytes()).decode('ascii')})
+                    self.log('asset.load', f'准备素材 {index+1}/{job["fileCount"]}', job)
+                    if job.get('mediaType') != 'video':
+                        await phase('asset', {'name': path.name, 'type': 'image/jpeg', 'data': base64.b64encode(path.read_bytes()).decode('ascii')})
                 prepared = await phase('prepare')
                 if prepared and prepared.get('state') == 'local_scheduled':
                     return prepared
@@ -303,24 +329,33 @@ class Publisher:
                     raise ValueError('未获得持久化提交许可，已停止发布')
                 self.log('submit.checkpoint_saved', '提交检查点已保存', job)
                 result = await phase('submit')
+                # A UI success message can precede reading its network response.
+                if confirmation and confirmation.tasks:
+                    await asyncio.wait(list(confirmation.tasks), timeout=2)
                 if confirmation and getattr(confirmation, 'confirmed', False):
+                    if job['platform'] == 'facebook':
+                        self.log('submit.success', 'Facebook 已返回本次创建帖子的确认', job)
+                        return {'state':'succeeded','message':'Facebook 已确认创建帖子。','url':confirmation.url}
                     self.log('submit.success', 'TikTok 本次发布接口已确认接收提交', job)
-                    return {'state':'succeeded','message':'TikTok 已确认接收作品；审核状态与可见范围请以平台为准。'}
+                    return {'state':'succeeded','message':'TikTok 已确认接收作品；审核状态与可见范围请以平台为准。','url':confirmation.url or (result or {}).get('url')}
                 if confirmation and confirmation.url:
-                    return {'state':'succeeded','message':'Bluesky 已确认发布。' if job['platform']=='bluesky' else 'Pinterest 已确认创建 Pin。','url':confirmation.url}
+                    return {'state':'succeeded','message':'平台已返回本次发布的帖子链接。','url':confirmation.url}
                 if result and result.get('state') == 'uncertain':
                     self.log('task.uncertain', '已提交，结果待确认', job, 'warn')
                     await self.capture_result(page, request, job, pending=True)
                     return {'state':'uncertain','message':'已提交，结果待确认'}
-                return {'state': 'succeeded', 'message': ('平台已确认定时排程：'+(job.get('nativeScheduledAt') or job['xScheduledAt'])+'。修改或取消请前往平台。') if (job.get('nativeScheduledAt') or job.get('xScheduledAt')) else ('TikTok 已确认提交作品；审核状态与可见范围请以平台为准。' if job['platform']=='tiktok' else '平台已显示发布成功确认。')}
-            return await asyncio.wait_for(execute(), timeout=180)
+                return {'state': 'succeeded', 'url': (result or {}).get('url'), 'message': ('平台已确认定时排程：'+(job.get('nativeScheduledAt') or job['xScheduledAt'])+'。修改或取消请前往平台。') if (job.get('nativeScheduledAt') or job.get('xScheduledAt')) else ('TikTok 已确认提交作品；审核状态与可见范围请以平台为准。' if job['platform']=='tiktok' else '平台已显示发布成功确认。')}
+            return await asyncio.wait_for(execute(), timeout=900 if job.get('mediaType') == 'video' else 180)
         except Exception as error:
             if confirmation and getattr(confirmation, 'confirmed', False):
+                if job['platform'] == 'facebook':
+                    self.log('submit.success', 'Facebook 已返回本次创建帖子的确认', job)
+                    return {'state':'succeeded','message':'Facebook 已确认创建帖子。','url':confirmation.url}
                 self.log('submit.success', 'TikTok 本次发布接口已确认接收提交', job)
-                return {'state':'succeeded','message':'TikTok 已确认接收作品；审核状态与可见范围请以平台为准。'}
+                return {'state':'succeeded','message':'TikTok 已确认接收作品；审核状态与可见范围请以平台为准。','url':confirmation.url}
             if confirmation and confirmation.url:
                 self.log('submit.success','平台已返回本次发布的帖子链接',job)
-                return {'state':'succeeded','message':'Bluesky 已确认发布。' if job['platform']=='bluesky' else 'Pinterest 已确认创建 Pin。','url':confirmation.url}
+                return {'state':'succeeded','message':'平台已返回本次发布的帖子链接。','url':confirmation.url}
             message = str(error) or '发布任务超时，请检查网络、登录或平台页面'
             self.log('task.uncertain' if checkpoint_requested else 'task.failed', '已提交，结果待确认' if checkpoint_requested else message, job, 'warn' if checkpoint_requested else 'error', traceback.format_exc())
             await self.capture_result(page, request, job, pending=checkpoint_requested)

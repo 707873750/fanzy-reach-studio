@@ -9,6 +9,7 @@ import type { BrowserSettings, Draft, ImageAsset, Platform, SettingsView } from 
 import type { CopyOptions } from "../../shared/types";
 import { canEditCopy } from "../../shared/draft-copy";
 import { canDeleteDraft, isPublishRecord } from "../../shared/draft-lifecycle";
+import { isVideo, videoIssues, VIDEO_RULES } from "../../shared/video-rules";
 
 import RunLogs from "./RunLogs";
 import PlatformSettings from "./PlatformSettings";
@@ -52,6 +53,8 @@ function App() {
   const publishing = publishingIds.length > 0;
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
+  const [folderFilter, setFolderFilter] = useState("");
+  const [mediaFilter, setMediaFilter] = useState("");
   const [checkedDrafts, setCheckedDrafts] = useState<string[]>([]);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
   const [xScheduleAt, setXScheduleAt] = useState("");
@@ -92,9 +95,26 @@ function App() {
   const selectedDrafts = queueDrafts.filter(draft => checkedDrafts.includes(draft.id));
   const canSubmitSelection = selectedDrafts.length > 0 && selectedDrafts.length <= 100 && selectedDrafts.every(draft => canPublish(draft) && !draftLocked(draft));
   const canDeleteSelection = selectedDrafts.length > 0 && selectedDrafts.every(draft => canDeleteDraft(draft) && !draftLocked(draft));
+  const folders = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const image of images) {
+      for (const folder of new Set(image.sourceFolders || [])) counts.set(folder, (counts.get(folder) || 0) + 1);
+    }
+    return [...counts].sort(([a], [b]) => a.localeCompare(b));
+  }, [images]);
+  const ungroupedCount = images.filter(image => !image.sourceFolders?.length).length;
   const filteredImages = useMemo(() => images.filter((image) =>
-    image.fileName.toLowerCase().includes(search.toLowerCase())
-  ), [images, search]);
+    image.fileName.toLowerCase().includes(search.toLowerCase()) &&
+    (!mediaFilter || (mediaFilter === "video" ? isVideo(image) : !isVideo(image))) &&
+    (!folderFilter || (folderFilter === "ungrouped" ? !image.sourceFolders?.length : image.sourceFolders?.includes(folderFilter)))
+  ), [images, search, folderFilter, mediaFilter]);
+  const selectedVideoIssues = useMemo(() => images.filter(image => selectedImages.includes(image.id) && isVideo(image)).flatMap(image =>
+    platforms.flatMap(platform => videoIssues(image, platform).map(issue => `${PLATFORM_META[platform].label} · ${image.fileName}：${issue}`))
+  ), [images, selectedImages, platforms]);
+
+  useEffect(() => {
+    if (folderFilter && (folderFilter === "ungrouped" ? !ungroupedCount : !folders.some(([folder]) => folder === folderFilter))) setFolderFilter("");
+  }, [folders, ungroupedCount, folderFilter]);
 
   async function refresh() {
     const [nextImages, nextDrafts, nextSettings, nextBrowserSettings] = await Promise.all([
@@ -182,14 +202,14 @@ function App() {
     }
   }
 
-  const importFiles = () => runBusy("正在导入图片…", async () => {
+  const importFiles = () => runBusy("正在导入素材…", async () => {
     const result = await window.reach.importImages();
-    setNotice(`已导入 ${result.imported.length} 张图片 · 重复 ${result.duplicates.length} 张 · 失败 ${result.errors.length} 张`);
+    setNotice(`已导入 ${result.imported.length} 项素材 · 重复 ${result.duplicates.length} 项 · 失败 ${result.errors.length} 项${result.errors.length ? `；${result.errors.slice(0, 3).join("；")}` : ""}`);
   });
 
   const importFolder = () => runBusy("正在扫描文件夹…", async () => {
     const result = await window.reach.importFolder();
-    setNotice(`已导入 ${result.imported.length} 张图片 · 重复 ${result.duplicates.length} 张 · 失败 ${result.errors.length} 张`);
+    setNotice(`已导入 ${result.imported.length} 项素材 · 重复 ${result.duplicates.length} 项 · 失败 ${result.errors.length} 项${result.errors.length ? `；${result.errors.slice(0, 3).join("；")}` : ""}`);
   });
 
   const createDrafts = () => runBusy("正在创建平台草稿…", async () => {
@@ -217,7 +237,7 @@ function App() {
         }
       }
       setSelectedImages(old => old.filter(id => !deleted.includes(id)));
-      setNotice(`已删除 ${deleted.length} 张素材。${errors.length ? `另有 ${errors.length} 张未删除，已保留选择。${errors.slice(0, 3).join("；")}${errors.length > 3 ? "；其余失败项可重试查看。" : ""}` : ""}`);
+      setNotice(`已删除 ${deleted.length} 项素材。${errors.length ? `另有 ${errors.length} 张未删除，已保留选择。${errors.slice(0, 3).join("；")}${errors.length > 3 ? "；其余失败项可重试查看。" : ""}` : ""}`);
     });
   };
 
@@ -373,38 +393,46 @@ function App() {
           {page === "library" && (
             <>
               <section className="page-heading">
-                <div><div className="eyebrow">素材管理</div><h1>素材库</h1><p>导入和管理图片，为各个平台准备发布素材。</p></div>
+                <div><div className="eyebrow">素材管理</div><h1>素材库</h1><p>导入和管理图片、视频，为各个平台准备发布素材。</p></div>
                 <div className="heading-actions">
                   <button className="button secondary" onClick={importFolder} disabled={busy}><FolderOpen size={16}/> 导入文件夹</button>
-                  <button className="button primary" onClick={importFiles} disabled={busy}><ImagePlus size={16}/> 导入图片</button>
+                  <button className="button primary" onClick={importFiles} disabled={busy}><ImagePlus size={16}/> 导入图片 / 视频</button>
                 </div>
               </section>
 
               <section className="stats-grid">
-                <div className="stat-card"><span>图片总数</span><strong>{images.length}</strong><small>本地保存</small></div>
+                <div className="stat-card"><span>素材总数</span><strong>{images.length}</strong><small>本地保存</small></div>
                 <div className="stat-card"><span>已选择</span><strong>{selectedImages.length}</strong><small>可创建草稿或删除素材</small></div>
                 <div className="stat-card"><span>草稿总数</span><strong>{queueDrafts.length}</strong><small>涵盖所有平台</small></div>
               </section>
 
               <section className="panel">
                 <div className="panel-heading">
-                  <div><h2>全部图片</h2><p>选择素材，设置统一文案或各平台独立文案。</p></div>
-                  <div className="search-box"><Search size={15}/><input placeholder="搜索图片…" value={search} onChange={(e) => setSearch(e.target.value)}/></div>
+                  <div><h2>全部素材</h2><p>选择素材，设置统一文案或各平台独立文案。</p></div>
+                  <div className="library-filters">
+                    <label className="folder-filter"><select aria-label="素材类型" value={mediaFilter} onChange={e => setMediaFilter(e.target.value)}><option value="">全部素材</option><option value="image">图片</option><option value="video">视频</option></select></label>
+                    <label className="folder-filter"><FolderOpen size={15}/><select aria-label="按文件夹筛选" value={folderFilter} onChange={e => setFolderFilter(e.target.value)} title={folderFilter === "ungrouped" ? "未记录文件夹" : folderFilter || "全部文件夹"}>
+                      <option value="">全部文件夹（{images.length}）</option>
+                      {folders.map(([folder, count]) => <option key={folder} value={folder}>{folder}（{count}）</option>)}
+                      {ungroupedCount > 0 && <option value="ungrouped">未记录文件夹（{ungroupedCount}）</option>}
+                    </select></label>
+                    <div className="search-box"><Search size={15}/><input placeholder="搜索素材…" value={search} onChange={(e) => setSearch(e.target.value)}/></div>
+                  </div>
                 </div>
                 <div className="library-actions heading-actions">
-                  <button className="button secondary" disabled={busy || !filteredImages.length} onClick={() => { setPendingImageDeleteIds(null); setSelectedImages(filteredImages.map(image => image.id)); }}><ListChecks size={16}/> {search ? "全选当前结果" : "全选"}（{filteredImages.length}）</button>
+                  <button className="button secondary" disabled={busy || !filteredImages.length} onClick={() => { setPendingImageDeleteIds(null); setSelectedImages(filteredImages.map(image => image.id)); }}><ListChecks size={16}/> {search || folderFilter || mediaFilter ? "全选当前结果" : "全选"}（{filteredImages.length}）</button>
                   <button className="button secondary" disabled={busy || !selectedImages.length} onClick={() => { setPendingImageDeleteIds(null); setSelectedImages([]); }}>清空选择</button>
                   <button className="button danger" disabled={busy || !selectedImages.length} onClick={() => setPendingImageDeleteIds([...selectedImages])}><Trash2 size={16}/> 删除所选（{selectedImages.length}）</button>
-                  {selectedImages.some(id => !filteredImages.some(image => image.id === id)) && <span className="muted">包含 {selectedImages.filter(id => !filteredImages.some(image => image.id === id)).length} 张当前搜索结果外的素材</span>}
+                  {selectedImages.some(id => !filteredImages.some(image => image.id === id)) && <span className="muted">包含 {selectedImages.filter(id => !filteredImages.some(image => image.id === id)).length} 张当前筛选结果外的素材</span>}
                 </div>
                 {pendingImageDeleteIds && <div className="delete-confirm" role="group" aria-label="确认删除素材">
-                  <p>确定删除选中的 {pendingImageDeleteIds.length} 张素材？将删除素材库中的图片副本及缩略图，无法恢复，导入前的原文件不受影响。发布记录会保留；仍被未完成草稿使用的图片会跳过。</p>
+                  <p>确定删除选中的 {pendingImageDeleteIds.length} 项素材？将删除素材库中的素材副本及缩略图，无法恢复，导入前的原文件不受影响。发布记录会保留；仍被未完成草稿使用的图片会跳过。</p>
                   <ul className="delete-file-list">{pendingImageDeleteIds.map(id => <li key={id}>{images.find(image => image.id === id)?.fileName || id}</li>)}</ul>
                   <div className="heading-actions"><button className="button danger small" disabled={busy} onClick={deleteSelectedImages}>确认删除素材</button><button className="button secondary small" disabled={busy} onClick={() => setPendingImageDeleteIds(null)}>取消</button></div>
                 </div>}
                 {images.length === 0 ? (
-                  <div className="empty-state"><div className="empty-icon"><Upload size={25}/></div><h3>素材库暂无图片</h3><p>导入文件夹或选择多张图片开始使用。</p><button className="button primary" onClick={importFolder}><FolderOpen size={16}/> 选择图片文件夹</button></div>
-                ) : filteredImages.length === 0 ? <div className="empty-mini">没有匹配的图片，请调整搜索内容。</div> : (
+                  <div className="empty-state"><div className="empty-icon"><Upload size={25}/></div><h3>素材库暂无素材</h3><p>导入文件夹或选择图片、视频开始使用。</p><button className="button primary" onClick={importFolder}><FolderOpen size={16}/> 选择素材文件夹</button></div>
+                ) : filteredImages.length === 0 ? <div className="empty-mini">没有匹配的素材，请调整文件夹筛选或搜索内容。</div> : (
                   <div className="image-grid">
                     {filteredImages.map((image) => (
                       <button key={image.id} className={`image-card ${selectedImages.includes(image.id) ? "selected" : ""}`} disabled={busy} aria-pressed={selectedImages.includes(image.id)} onClick={() => toggleImage(image.id)}>
@@ -412,7 +440,7 @@ function App() {
                           {image.thumbnailDataUrl ? <img src={image.thumbnailDataUrl} alt={image.fileName}/> : <FileImage/>}
                           <span className="select-indicator">{selectedImages.includes(image.id) ? <Check size={14}/> : ""}</span>
                         </div>
-                        <div className="image-meta"><strong title={image.fileName}>{image.fileName}</strong><span>{image.width} × {image.height}</span></div>
+                        <div className="image-meta"><strong title={image.fileName}>{image.fileName}</strong><span>{isVideo(image) ? `视频 · ${Math.round(image.video?.duration || 0)} 秒 · ` : ""}{image.width} × {image.height}</span></div>
                       </button>
                     ))}
                   </div>
@@ -420,6 +448,9 @@ function App() {
               </section>
 
               <section className="panel create-panel">
+                <details className="video-rules"><summary>视频上传要求与平台限制</summary><p>每条视频单独创建草稿。发布兼容格式：MP4 / H.264、AAC 或无音轨；不自动裁剪或转码。MOV、WebM 可导入查看，但需自行转换后发布。</p>{platforms.map(platform => <p key={platform}><strong>{PLATFORM_META[platform].label}：</strong>{VIDEO_RULES[platform].note}</p>)}<p>AI 文案仅参考视频封面，不分析完整视频或音轨。</p></details>
+                {selectedVideoIssues.length > 0 && <div className="delete-confirm" role="alert">请先处理视频限制，或取消选择不适用的平台：<ul>{selectedVideoIssues.slice(0, 8).map((issue, index) => <li key={index}>{issue}</li>)}</ul>{selectedVideoIssues.length > 8 && <p>另有 {selectedVideoIssues.length - 8} 项，请分批查看。</p>}</div>}
+                {selectedImages.length === 1 && images.some(image => image.id === selectedImages[0] && isVideo(image)) && <button className="button secondary small" onClick={() => void window.reach.previewMedia(selectedImages[0]).catch(error => setNotice(error.message))}>播放所选视频</button>}
                 <div className="panel-heading"><div><h2>创建发布草稿</h2><p>选择发布平台，图片将按各平台的默认数量分组，并带入已保存的图板、标签和定时偏好。</p></div><button className="text-button" onClick={()=>setPage("settings")}>配置各平台默认选项</button></div>
                 <div className="platform-options">
                   {(["instagram", "x", "pinterest", "tiktok", "bluesky", "facebook"] as Platform[]).map((platform) => {
@@ -432,7 +463,7 @@ function App() {
                 </div>
                 <div className="copy-options">
                   <div className="field"><label htmlFor="shared-caption">统一文案</label><CaptionEditor id="shared-caption" rows={4} maxLength={5000} disabled={busy} value={copyOptions.sharedCaption} html={copyOptions.sharedCaptionHtml} onChange={(value,html)=>setCopyOptions(old=>({...old,sharedCaption:value,sharedCaptionHtml:html}))} placeholder="填写共用文案；下方可为任意平台单独编写"/></div>
-                  <p className="muted">共用文案会关联本次创建的草稿。平台独立文案会在切换时保留；素材按各平台批量大小拆分。</p>
+                  <p className="muted">共用文案会关联本次创建的草稿。平台独立文案会在切换时保留；图片按各平台批量大小拆分，视频每条单独创建草稿。</p>
                   {platforms.map(platform=><div className="field" key={platform}>
                     <label htmlFor={`copy-mode-${platform}`}>{PLATFORM_META[platform].label} 文案方式</label>
                     <select id={`copy-mode-${platform}`} disabled={busy} value={copyOptions.platforms[platform]?.mode || "shared"} onChange={e=>setCopyOptions(old=>({...old,platforms:{...old.platforms,[platform]:{caption:old.platforms[platform]?.caption || "",captionHtml:old.platforms[platform]?.captionHtml,mode:e.target.value as "shared" | "independent"}}}))}>
@@ -442,8 +473,8 @@ function App() {
                   </div>)}
                 </div>
                 <div className="create-footer">
-                  <span>已选择 {selectedImages.length} 张图片 · {platforms.length} 个平台</span>
-                  <button className="button primary" onClick={createDrafts} disabled={busy || !selectedImages.length || !platforms.length}><Plus size={16}/> 创建草稿</button>
+                  <span>已选择 {selectedImages.length} 项素材 · {platforms.length} 个平台</span>
+                  <button className="button primary" onClick={createDrafts} disabled={busy || !selectedImages.length || !platforms.length || selectedVideoIssues.length > 0}><Plus size={16}/> 创建草稿</button>
                 </div>
               </section>
             </>
@@ -486,7 +517,7 @@ function App() {
                       const Icon = meta.icon;
                       return <div key={draft.id} className="draft-select-row"><input type="checkbox" aria-label={`选择 ${meta.label} 草稿 ${draft.id}`} checked={checkedDrafts.includes(draft.id)} disabled={busy || draftLocked(draft) || !canDeleteDraft(draft)} onChange={(e) => setCheckedDrafts((old) => e.target.checked ? [...old, draft.id] : old.filter((id) => id !== draft.id))}/><button className={`draft-row ${selectedDraftId === draft.id ? "selected" : ""}`} onClick={() => setSelectedDraftId(draft.id)}>
                         <div className="platform-icon" style={{ color: meta.color }}><Icon size={18}/></div>
-                        <div className="draft-row-main"><strong>{meta.label}</strong><span>{draft.imageIds.length} 张图片 · {STATUS_LABEL[draft.browserPublish?.state || draft.status] || draft.status}</span></div>
+                        <div className="draft-row-main"><strong>{meta.label}</strong><span>{draft.imageIds.length} 项素材 · {STATUS_LABEL[draft.browserPublish?.state || draft.status] || draft.status}</span></div>
                         <span className={`status-dot ${draft.status}`}/>
                       </button></div>;
                     })}
@@ -496,7 +527,7 @@ function App() {
                   {!selectedDraft ? <div className="empty-state"><div className="empty-icon"><ListChecks/></div><h3>选择一条草稿</h3><p>从左侧列表选择发布任务。</p></div> : (
                     <>
                       <div className="detail-heading">
-                        <div><div className="eyebrow">平台草稿</div><h2>{PLATFORM_META[selectedDraft.platform].label}</h2><p>{selectedDraft.imageIds.length} 张图片 · {STATUS_LABEL[selectedDraft.status]}</p></div>
+                        <div><div className="eyebrow">平台草稿</div><h2>{PLATFORM_META[selectedDraft.platform].label}</h2><p>{selectedDraft.imageIds.length} 项素材 · {STATUS_LABEL[selectedDraft.status]}</p></div>
                         <button className="icon-button danger" disabled={detailBusy || !canDeleteDraft(selectedDraft)} title="删除草稿" onClick={() => void runBusy("正在删除草稿…", async () => { await window.reach.deleteDraft(selectedDraft.id); setCheckedDrafts((old) => old.filter((id) => id !== selectedDraft.id)); setSelectedDraftId(null); })}><Trash2 size={17}/></button>
                       </div>
                       {selectedDraft.browserPublish && <div className="published-box"><strong>{STATUS_LABEL[selectedDraft.browserPublish.state]}</strong><button className="text-button" onClick={() => { setLogDraftId(selectedDraft.id); setPage("logs"); }}>查看该任务日志</button><p className="muted">{selectedDraft.browserPublish.message}</p>
@@ -527,7 +558,7 @@ function App() {
                         title={selectedDraft.preparedFolder ? "将此卡片拖入平台发布窗口" : "请先准备素材"}
                       >
                         <div className="drag-zone-top">
-                          <div><strong>拖动图片到 {PLATFORM_META[selectedDraft.platform].label}</strong><span>{selectedDraft.preparedFolder ? "将此卡片拖入平台编辑器" : "准备素材后可拖动图片"}</span></div>
+                          <div><strong>拖动素材到 {PLATFORM_META[selectedDraft.platform].label}</strong><span>{selectedDraft.preparedFolder ? "将此卡片拖入平台编辑器" : "准备素材后可拖动素材"}</span></div>
                           <span className="drag-grip">⠿</span>
                         </div>
                         <div className="detail-images">
@@ -536,7 +567,7 @@ function App() {
                             return image?.thumbnailDataUrl ? <img key={id} src={image.thumbnailDataUrl} alt={image.fileName}/> : null;
                           })}
                         </div>
-                        <div className="drag-zone-foot">{selectedDraft.imageIds.length} 张图片 · 手动发布时可拖动上传</div>
+                        <div className="drag-zone-foot">{selectedDraft.imageIds.length} 项素材 · 手动发布时可拖动上传</div>
                       </div>
                       <div className="field">
                         <label>帖子标题 / Pin 标题</label>

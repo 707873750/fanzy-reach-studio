@@ -66,6 +66,22 @@ class TikTokConfirmation(PinterestConfirmation):
             if not project_accepted and len(ids) != 1:
                 return
             self.confirmed = True
+            # A project/job ID is not a public post ID. Only retain a permalink
+            # with the confirmed item ID, or build one with its returned author.
+            link_ids = ids or ({str(post.get('post_id')) for post in posts if isinstance(post, dict) and re.fullmatch(r'\d{10,30}', str(post.get('post_id', '')))} if project_accepted else set())
+            if len(link_ids) == 1:
+                item_id = next(iter(link_ids))
+                for node in candidates:
+                    share = node.get('share_url') or (node.get('share_info') or {}).get('share_url')
+                    parsed = urlsplit(share) if isinstance(share, str) else None
+                    if parsed and parsed.scheme == 'https' and parsed.hostname in ('www.tiktok.com', 'tiktok.com') and re.fullmatch(r'/@[A-Za-z0-9._-]+/(video|photo)/'+item_id+r'/?', parsed.path):
+                        self.url = 'https://www.tiktok.com' + parsed.path
+                        break
+                    author = node.get('author') or {}
+                    username = author.get('unique_id') if isinstance(author, dict) else None
+                    if isinstance(username, str) and re.fullmatch(r'[A-Za-z0-9._-]+', username) and str(node.get('item_id', node.get('aweme_id', ''))) == item_id and node.get('video'):
+                        self.url = 'https://www.tiktok.com/@' + username + '/video/' + item_id
+                        break
             await self.page.evaluate('()=>globalThis.fanzyPublisher("confirm_tiktok",{platform:"tiktok"})')
         except Exception:
             # Confirmation survives a navigation that destroys the adapter.

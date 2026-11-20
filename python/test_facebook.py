@@ -1,5 +1,6 @@
 """Offline Facebook integration tests; no real posts are sent."""
 import unittest
+import json
 import test_playwright
 from adapters import validate
 
@@ -37,6 +38,31 @@ class FacebookTests(unittest.IsolatedAsyncioTestCase):
             return False
         await self.runner.publish({**self.job, 'platform':'facebook'}, reject)
         self.assertFalse(any(e['step']=='submit.click' for e in self.events))
+
+    async def assert_creation_response(self, creation, expected_url):
+        mutation = "fetch('/api/graphql/',{method:'POST',body:new URLSearchParams({fb_api_req_friendly_name:'ComposerStoryCreateMutation',variables:JSON.stringify({input:{message:{text:document.querySelector('[role=textbox]').innerText},attachments:[{photo:{id:'123'}}]}})})})"
+        fixture = PAGE.replace("document.querySelector('#success').textContent='Your post has been shared.'", mutation)
+        async def setup(context, job):
+            self.context = context
+            async def route(r):
+                if r.request.is_navigation_request():
+                    await r.fulfill(content_type='text/html', body=fixture)
+                elif r.request.url.endswith('/api/graphql/'):
+                    await r.fulfill(body='for (;;);'+json.dumps({'data':{'story_create':creation}}))
+                else:
+                    await r.abort()
+            await context.route('**/*', route)
+        self.runner.context_setup = setup
+        result = await self.runner.publish({**self.job,'platform':'facebook'}, self.checkpoint)
+        self.assertEqual(result['state'], 'succeeded', result)
+        self.assertEqual(result.get('url'), expected_url)
+        self.assertEqual(sum(e['step']=='submit.click' for e in self.events), 1)
+
+    async def test_creation_response_confirms_without_toast(self):
+        await self.assert_creation_response({'story':{'id':'story-id','url':'https://www.facebook.com/posts/123'}}, 'https://www.facebook.com/posts/123')
+
+    async def test_top_level_creation_id_confirms_without_story_or_toast(self):
+        await self.assert_creation_response({'post_id':'123456789012345','story':None}, None)
 
     async def test_missing_confirmation_is_uncertain(self):
         self.fixture['facebook'] = PAGE.replace('Your post has been shared.', 'Uploading')
