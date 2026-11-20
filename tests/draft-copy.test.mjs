@@ -192,3 +192,21 @@ for(const platform of ['instagram','pinterest','tiktok','bluesky']) {
   assert.equal(created[0].status,'draft','defaults never auto-arm a newly created draft');
 }
 console.log('PASS: scheduling defaults on all platforms, persistence, cancellation, reminder isolation and validation');
+
+const localTask = id => make(id, {status:'local_scheduled', publishAt:scheduledTime, scheduleMode:'local'});
+data.drafts = [localTask('local-a'), localTask('local-b'), ...records, ...editable,
+  ...['running','uncertain'].map(state => ({...localTask(state), browserPublish:{state}}))];
+assert.equal(lifecycle.isLocalScheduledDraft(data.drafts[0]), true);
+assert.ok([...records,...editable].every(d => !lifecycle.isLocalScheduledDraft(d)));
+const localBefore = JSON.stringify(data);
+for (const invalid of [null, [], 'local-a', [null], [''], ['local-a','missing'],
+  ...[...records,...editable,...protectedDrafts].map(d => ['local-a',d.id])]) {
+  await assert.rejects(svc.deleteLocalScheduledDrafts(invalid));
+  assert.equal(JSON.stringify(data), localBefore, 'invalid or stale batches never partially delete tasks');
+}
+assert.equal(await svc.deleteLocalScheduledDrafts(['local-a','local-a']), 1);
+assert.equal(await svc.deleteLocalScheduledDrafts(['local-b']), 1);
+data = JSON.parse(persisted);
+assert.ok(!data.drafts.some(d => ['local-a','local-b'].includes(d.id)), 'removed tasks stay deleted after reload');
+assert.equal(JSON.stringify(data.images), assetsBefore, 'scheduled deletion preserves media');
+console.log('PASS: local schedule deletion, state validation, protected tasks, atomic batches and persistence');

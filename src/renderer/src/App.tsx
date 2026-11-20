@@ -11,16 +11,17 @@ import {
 import type { BrowserSettings, Draft, ImageAsset, Platform, SettingsView } from "../../shared/types";
 import type { CopyOptions } from "../../shared/types";
 import { canEditCopy } from "../../shared/draft-copy";
-import { canDeleteDraft, isPublishRecord } from "../../shared/draft-lifecycle";
+import { canDeleteDraft, isLocalScheduledDraft, isPublishRecord } from "../../shared/draft-lifecycle";
 import { isVideo, videoIssues, VIDEO_RULES } from "../../shared/video-rules";
 
 import RunLogs from "./RunLogs";
 import PlatformSettings from "./PlatformSettings";
 import ImageGenerator, { ImageGenerationSettings } from "./ImageGenerator";
 import PublishHistory from "./PublishHistory";
+import LocalSchedules from "./LocalSchedules";
 import CaptionEditor from "./CaptionEditor";
 
-type Page = "library" | "queue" | "history" | "settings" | "logs";
+type Page = "library" | "queue" | "schedules" | "history" | "settings" | "logs";
 
 const PLATFORM_META: Record<Platform, { label: string; url: string; icon: typeof Instagram; color: string }> = {
   facebook: { label: "Facebook", url: "https://www.facebook.com/", icon: Facebook, color: "#1877F2" },
@@ -92,7 +93,9 @@ function App() {
     }
   };
 
-  const queueDrafts = useMemo(() => drafts.filter(draft => !isPublishRecord(draft)), [drafts]);
+  const queueDrafts = useMemo(() => drafts.filter(draft => !isPublishRecord(draft) && !isLocalScheduledDraft(draft)), [drafts]);
+  const localSchedules = useMemo(() => drafts.filter(isLocalScheduledDraft).sort((a, b) =>
+    (Date.parse(a.publishAt || a.xScheduledAt || "") || 0) - (Date.parse(b.publishAt || b.xScheduledAt || "") || 0)), [drafts]);
   const publishRecords = useMemo(() => drafts.filter(isPublishRecord).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), [drafts]);
   const selectedDraft = queueDrafts.find((draft) => draft.id === selectedDraftId) || null;
   const lockedGroups = new Set(drafts.filter(d => publishingIds.includes(d.id) || d.browserPublish?.state === "running").map(d => d.copyGroupId).filter(Boolean));
@@ -367,6 +370,9 @@ function App() {
         <button className={`nav-item ${page === "queue" ? "active" : ""}`} onClick={() => setPage("queue")}>
           <ListChecks size={17}/> {t("发布队列")}<span className="nav-count">{queueDrafts.length}</span>
         </button>
+        <button className={`nav-item ${page === "schedules" ? "active" : ""}`} onClick={() => setPage("schedules")}>
+          <CalendarClock size={17}/> {t("本地定时任务")}<span className="nav-count">{localSchedules.length}</span>
+        </button>
         <button className={`nav-item ${page === "history" ? "active" : ""}`} onClick={() => setPage("history")}>
           <CheckCircle2 size={17}/> {t("发布记录")}<span className="nav-count">{publishRecords.length}</span>
         </button>
@@ -400,7 +406,7 @@ function App() {
 
       <main className="main">
         <header className="topbar">
-          <div className="breadcrumbs">{t("工作空间")}<span>/</span> {page === "library" ? t("素材库") : page === "queue" ? t("发布队列") : page === "history" ? t("发布记录") : page === "logs" ? t("运行日志") : t("设置")}</div>
+          <div className="breadcrumbs">{t("工作空间")}<span>/</span> {page === "library" ? t("素材库") : page === "queue" ? t("发布队列") : page === "schedules" ? t("本地定时任务") : page === "history" ? t("发布记录") : page === "logs" ? t("运行日志") : t("设置")}</div>
           <div className="top-actions">
             <LanguageSelect />
             <span className="online-dot"/> {t("本地工作空间")}<div className="avatar">FR</div>
@@ -421,6 +427,21 @@ function App() {
           }}>{cancellingPublish ? t("正在停止…") : t("停止本次发布")}</button></div>}
 
           {page === "logs" && <RunLogs draftId={logDraftId}/> }
+          {page === "schedules" && <LocalSchedules tasks={localSchedules} images={images} platforms={PLATFORM_META} busy={busy} isLocked={draftLocked}
+            onDelete={ids => runBusy(t("正在删除本地定时任务…"), async () => {
+              const count = await window.reach.deleteLocalScheduledDrafts(ids);
+              setDrafts(old => old.filter(draft => !ids.includes(draft.id)));
+              setNotice(t("已删除 {0} 条本地定时任务，不会再自动发布。", [count]));
+            })}
+            onCancel={id => runBusy(t("正在取消定时…"), async () => {
+              const draft = await window.reach.updateDraft(id, {publishAt:null});
+              setDrafts(old => old.map(item => item.id === id ? draft : item));
+              setNotice(t("已取消本地定时，草稿已保留。"));
+              setSelectedDraftId(id);
+              setPage("queue");
+            })}
+            onLogs={id => { setLogDraftId(id); setPage("logs"); }}/>
+          }
           {page === "history" && <PublishHistory records={publishRecords} images={images} platforms={PLATFORM_META} busy={busy} isLocked={draftLocked} onDelete={deletePublishRecords} onLogs={id => { setLogDraftId(id); setPage("logs"); }}/>}
           {page === "library" && (
             <>
@@ -582,7 +603,6 @@ function App() {
                         <input id="x-schedule" type="datetime-local" disabled={detailBusy || !canEditCopy(selectedDraft)} value={xScheduleAt} onChange={e=>setXScheduleAt(e.target.value)}/>
                         <p className="muted">{t("留空立即发布。选择至少 5 分钟后的时间，保存后提交任务。原生排程确认后可关闭程序；本地任务需保持电脑唤醒、程序运行、联网和登录有效。退出或休眠期间错过的任务恢复后补发，失败不会自动重试。修改本地任务时间会取消原任务，需要重新提交。已提交的原生排程请前往平台修改。")}</p>
                       </div>}
-                      {selectedDraft.status === "local_scheduled" && <div className="schedule-box"><strong>{t("本地定时：{0}", [formatDate(selectedDraft.publishAt!)])}</strong><p>{t("请保持电脑唤醒和程序运行。")}</p><button className="button secondary" disabled={detailBusy} onClick={() => void runBusy(t("正在取消定时…"), async () => {await window.reach.updateDraft(selectedDraft.id, {publishAt:null}); setXScheduleAt(""); setNotice(t("已取消本地定时，草稿已保留。"));})}>{t("取消本地定时")}</button></div>}
                       <div
                         className={`native-drag-zone ${selectedDraft.preparedFolder ? "is-ready" : ""}`}
                         draggable={Boolean(selectedDraft.preparedFolder)}

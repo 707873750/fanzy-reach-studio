@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import { initStore, getStore, persistStore, getAppPaths, findDraft, findImage } from "./store";
 import { importFiles, listImages, deleteImage } from "./image-service";
 import { saveVolcKeys, clearVolcKeys, generateImage, resumeImageTask, discardImageTask, getGeneratedImage, saveGeneratedImage, loadEditImage } from "./image-generation";
-import { createDrafts, listDrafts, deleteDraft, deleteDrafts, deletePublishRecords, updateDraft, prepareDraft, markPublished, scheduleDraft } from "./draft-service";
+import { createDrafts, listDrafts, deleteDraft, deleteDrafts, deleteLocalScheduledDrafts, deletePublishRecords, updateDraft, prepareDraft, markPublished, scheduleDraft } from "./draft-service";
 import { generateCaption, generateSharedCaption, saveDeepSeekKey, clearDeepSeekKey, getSettings } from "./ai-service";
 import type { CopyOptions, Platform } from "../shared/types";
 import { runDueScheduledDrafts, assertNotPublishing, getBrowserSettings, saveBrowserSettings, closePlatformBrowser, openPlatformBrowser, publishDrafts, cancelPublishBatch, getPublishBatch, resolvePublish, recoverPublishing, stopPublisher } from "./browser-publisher";
@@ -114,6 +114,11 @@ function registerIpc() {
     return deletePublishRecords(ids);
   });
   handle("drafts:delete", (_event, id: string) => { assertNotPublishing(id); return deleteDraft(id); });
+  handle("drafts:delete-local-scheduled", (_event, ids: string[]) => {
+    if (!Array.isArray(ids) || ids.some(id => typeof id !== "string")) throw new Error("无效的草稿请求");
+    ids.forEach(id => assertNotPublishing(id));
+    return deleteLocalScheduledDrafts(ids);
+  });
   handle("drafts:delete-many", (_event, ids: string[]) => {
     if (!Array.isArray(ids) || ids.some(id => typeof id !== "string")) throw new Error("无效的草稿请求");
     ids.forEach(id => assertNotPublishing(id));

@@ -7,7 +7,7 @@ import { getAppPaths, getStore, findDraft, findImage, persistStore, updateDraftR
 import type { CopyOptions, Draft, DraftPatch, Platform } from "../shared/types";
 import { applyCaptionPatch, canEditCopy } from "../shared/draft-copy";
 import { readPlatformDefaults } from "../shared/platform-defaults";
-import { canDeleteDraft, canDeletePublishRecord } from "../shared/draft-lifecycle";
+import { canDeleteDraft, canDeletePublishRecord, isLocalScheduledDraft } from "../shared/draft-lifecycle";
 import { assertVideoCompatible, assertVideoCaption, groupMedia, isVideo } from "../shared/video-rules";
 
 const PLATFORM_URLS: Record<Platform, string> = {
@@ -156,6 +156,18 @@ export async function deleteDrafts(draftIds: string[]) {
   store.drafts = store.drafts.filter((draft) => !ids.has(draft.id));
   await persistStore();
   return ids.size;
+}
+
+export async function deleteLocalScheduledDrafts(draftIds: string[]) {
+  if (!Array.isArray(draftIds) || !draftIds.length || draftIds.some(id => typeof id !== "string" || !id)) {
+    throw new Error("请选择要删除的本地定时任务");
+  }
+  for (const id of new Set(draftIds)) {
+    const draft = findDraft(id);
+    if (!draft || !isLocalScheduledDraft(draft)) throw new Error("本地定时任务状态已变化，请刷新后重试");
+  }
+  // Validate and remove synchronously before persistence yields to the scheduler.
+  return deleteDrafts(draftIds);
 }
 
 export async function deletePublishRecords(recordIds: string[]) {

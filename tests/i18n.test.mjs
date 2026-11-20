@@ -11,7 +11,7 @@ for(const [key, translations] of Object.entries(messages)) {
     assert.deepEqual(placeholders(text),placeholders(key),key);
   }
 }
-for(const name of ['App','CaptionEditor','ImageGenerator','PlatformSettings','PublishHistory','RunLogs','LanguageSelect']) {
+for(const name of ['App','CaptionEditor','ImageGenerator','PlatformSettings','PublishHistory','LocalSchedules','RunLogs','LanguageSelect']) {
   const source=fs.readFileSync(`src/renderer/src/${name}.tsx`,'utf8');
   const ast=ts.createSourceFile(name,source,99,true,ts.ScriptKind.TSX);
   function visit(node) {

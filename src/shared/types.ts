@@ -129,6 +129,7 @@ export interface ReachApi {
   listDrafts: () => Promise<Draft[]>;
   deleteDraft: (draftId: string) => Promise<void>;
   deleteDrafts: (draftIds: string[]) => Promise<number>;
+  deleteLocalScheduledDrafts: (draftIds: string[]) => Promise<number>;
   deletePublishRecords: (recordIds: string[]) => Promise<number>;
   updateDraft: (draftId: string, patch: DraftPatch) => Promise<Draft>;
   generateCaption: (draftId: string) => Promise<Draft>;
