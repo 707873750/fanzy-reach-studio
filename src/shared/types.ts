@@ -104,6 +104,9 @@ export interface ReachApi {
   closePlatformBrowser: (platform: Platform) => Promise<void>;
   openPlatformBrowser: (platform: Platform) => Promise<void>;
   publishDrafts: (ids: string[]) => Promise<Draft[]>;
+  cancelPublishBatch: () => Promise<void>;
+  getPublishBatch: () => Promise<string[]>;
+  onPublishBatch: (callback: (ids: string[]) => void) => () => void;
   resolvePublish: (id: string, published: boolean) => Promise<void>;
   onPublishProgress: (callback: (draft: Draft) => void) => () => void;
   importImages: () => Promise<ImportResult>;

@@ -7,7 +7,7 @@ import { importFiles, listImages, deleteImage } from "./image-service";
 import { createDrafts, listDrafts, deleteDraft, deleteDrafts, deletePublishRecords, updateDraft, prepareDraft, markPublished, scheduleDraft } from "./draft-service";
 import { generateCaption, generateSharedCaption, saveDeepSeekKey, clearDeepSeekKey, getSettings } from "./ai-service";
 import type { CopyOptions, Platform } from "../shared/types";
-import { runDueScheduledDrafts, assertNotPublishing, getBrowserSettings, saveBrowserSettings, closePlatformBrowser, openPlatformBrowser, publishDrafts, resolvePublish, recoverPublishing, stopPublisher } from "./browser-publisher";
+import { runDueScheduledDrafts, assertNotPublishing, getBrowserSettings, saveBrowserSettings, closePlatformBrowser, openPlatformBrowser, publishDrafts, cancelPublishBatch, getPublishBatch, resolvePublish, recoverPublishing, stopPublisher } from "./browser-publisher";
 
 import { initLogs, log, getLogs, flushLogs, errorDetail } from "./run-logger";
 import { getPlatformDefaults, savePlatformDefaults } from "./platform-settings";
@@ -65,6 +65,8 @@ function registerIpc() {
   handle("browser:close", (_event, platform: Platform) => closePlatformBrowser(platform));
   handle("browser:open", (_event, platform: Platform) => openPlatformBrowser(platform));
   handle("browser:publish", (_event, ids: string[]) => publishDrafts(ids));
+  handle("browser:cancel-publish", () => cancelPublishBatch());
+  handle("browser:publish-batch", () => getPublishBatch());
   handle("browser:resolve", (_event, id: string, published: boolean) => resolvePublish(id, published));
   handle("images:import-files", async () => {
     const result = await dialog.showOpenDialog({

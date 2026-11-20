@@ -11,6 +11,15 @@ const source=await fs.readFile('src/main/browser-publisher.ts','utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText;
 let drafts=[], spawned=[], active=new Set(), maximum=0, starts=[], finished=[], failPlatform, crashPlatform, fallbackPlatform, lockedDuringCompletion=false;
 const events=[];
+const holdBefore = new Set(), holdAfter = new Set();
+let prepareGate;
+const waitFor = async predicate => {
+  const deadline = Date.now() + 2000;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error('Fixture timed out');
+    await new Promise(resolve => setTimeout(resolve, 1));
+  }
+};
 const urlModule={exports:{}};
 vm.runInNewContext(ts.transpileModule(await fs.readFile('src/shared/post-url.ts','utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports:urlModule.exports,URL});
 const store={
@@ -30,6 +39,7 @@ function spawn() {
     if(message.ack) {
       assert.equal(message.ack,'persisted');
       assert.equal(store.findDraft(job.id).browserPublish.state,'uncertain');
+      if (holdAfter.has(job.id)) { done(); return; }
       setTimeout(()=>{
         active.delete(job.platform);finished.push(job.id);
         assert.throws(()=>api.assertNotPublishing(job.id));lockedDuringCompletion=true;
@@ -42,19 +52,19 @@ function spawn() {
       if(job.platform===fallbackPlatform && job.nativeScheduledAt) {active.delete(job.platform);emit({type:'result',state:'local_scheduled'});done();return;}
       if(store.findDraft(job.id).scheduleMode==='local') {assert.equal(job.nativeScheduledAt,null);assert.equal(job.xScheduledAt,null);}
       if(job.platform===crashPlatform) {active.delete(job.platform);emit({type:'fatal',message:'fixture process failure'});done();return;}
-      emit({type:'submitting'});
+      if (!holdBefore.has(job.id)) emit({type:'submitting'});
     } else emit({type:'result',state:'opened'});
     done();
   }});
-  child.kill=()=>{child.exitCode=1;child.emit('exit',1,null);};
-  child.stdin.on('finish',()=>{child.exitCode=0;child.emit('exit',0,null);});
+  child.kill=()=>{if(job) active.delete(job.platform);child.exitCode=1;child.emit('exit',1,null);};
+  child.stdin.on('finish',()=>{if(job) active.delete(job.platform);child.exitCode=0;child.emit('exit',0,null);});
   spawned.push(child);return child;
 }
 const dependencies={
   electron:{app:{isPackaged:false,getAppPath:()=>'/fixture'},BrowserWindow:{getAllWindows:()=>[]}},
   'node:child_process':{spawn},'node:readline':{createInterface},
   'node:fs/promises':{readdir:async()=>['01-photo.jpg']},'node:fs':{existsSync:()=>true},'node:path':path,
-  './store':store,'./draft-service':{prepareDraft:async id=>({folder:'/fixture/'+id, files:['/fixture/'+id+'/01-photo.jpg'], mediaType:'image'})},
+  './store':store,'./draft-service':{prepareDraft:async id=>{if(prepareGate) await prepareGate;return {folder:'/fixture/'+id, files:['/fixture/'+id+'/01-photo.jpg'], mediaType:'image'};}},
   './publisher-runtime':{publisherCommand:()=>({command:'fixture-python',args:[]}),macSessionKey:()=>undefined},
   './run-logger':{log:async e=>events.push(e),errorDetail:String},
   '../shared/post-url':urlModule.exports,
@@ -127,6 +137,37 @@ await api.runDueScheduledDrafts();
 assert.equal(drafts[0].browserPublish.state,'uncertain');
 await api.runDueScheduledDrafts();
 assert.equal(starts.length,2,'uncertain local publication must never auto-retry');
+failPlatform=undefined; fallbackPlatform=undefined; starts=[];
+drafts=[make('stop-before','x'),make('stop-next','x'),make('stop-after','tiktok'),make('stop-later','tiktok'),make('stop-complete','bluesky')];
+holdBefore.add('stop-before'); holdAfter.add('stop-after');
+const cancelledBatch=api.publishDrafts(drafts.map(d=>d.id));
+await waitFor(()=>starts.includes('stop-before') && drafts[2].browserPublish?.state==='uncertain' && drafts[4].status==='published');
+assert.equal(api.getPublishBatch().length,5);
+await Promise.all([api.cancelPublishBatch(),api.cancelPublishBatch(),cancelledBatch]);
+assert.equal(drafts[0].browserPublish.state,'needs_attention');
+assert.equal(drafts[2].browserPublish.state,'uncertain');
+assert.ok(drafts[2].browserPublish.submittedAt,'retain submission checkpoint for interrupted task');
+assert.ok(!starts.includes('stop-next') && !starts.includes('stop-later'),'stop all queued platform tasks');
+assert.ok(drafts[1].browserPublish.message.includes('尚未提交'));
+assert.equal(drafts[4].status,'published','keep already confirmed successes when cancelling');
+assert.equal(api.getPublishBatch().length,0);
+drafts.forEach(d=>api.assertNotPublishing(d.id));
+await assert.rejects(api.publishDrafts(['stop-after']),/核对/);
+await api.publishDrafts(['stop-next']);
+assert.equal(drafts[1].status,'published','a new batch works after cancellation');
+await api.cancelPublishBatch(); // Idle cancellation is harmless.
+
+let releasePreparation;
+prepareGate=new Promise(resolve=>{releasePreparation=resolve;});
+drafts=[make('stop-preparing','x')]; starts=[];
+const preparingBatch=api.publishDrafts(['stop-preparing']);
+await waitFor(()=>drafts[0].browserPublish?.state==='running');
+const stopPreparing=api.cancelPublishBatch();
+releasePreparation();
+await Promise.all([preparingBatch,stopPreparing]);
+prepareGate=undefined;
+assert.equal(starts.length,0,'cancellation during preparation never launches a worker');
+assert.equal(drafts[0].browserPublish.state,'needs_attention');
 await api.stopPublisher();
 assert.ok(spawned.every(child=>child.exitCode!==null));
-console.log('PASS: cross-platform concurrency, per-platform ordering, checkpoint isolation, batch locks, failure isolation, login reuse and shutdown');
+console.log('PASS: concurrency, ordering, checkpoint isolation, cancellation before/after submission and preparation, queued tasks stopped, restart after cancellation, login reuse and shutdown');

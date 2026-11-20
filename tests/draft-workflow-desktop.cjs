@@ -14,6 +14,8 @@ if (process.type === 'renderer') {
     getSettings:async()=>({hasDeepSeekKey:false,model:'deepseek-flash'}),
     getBrowserSettings:async()=>({showBrowser:false,channel:'chrome'}),
     onScheduleReminder:()=>()=>{}, onPublishProgress:fn=>{fixture.progress=fn;return()=>{};},
+    getPublishBatch:async()=>[], onPublishBatch:fn=>{fixture.batch=fn;return()=>{};},
+    cancelPublishBatch:async()=>{fixture.cancelled=true;await new Promise(resolve=>{fixture.finishCancel=resolve;});fixture.batch([]);},
     reportUiPerformance:async()=>{}, reportRendererError:async()=>{},
     copyText:async text=>{fixture.copied=text;return true;}, openExternal:async url=>{fixture.opened=url;},
     deleteDrafts:async ids=>{fixture.deleted.push([...ids]);fixture.drafts=fixture.drafts.filter(d=>!ids.includes(d.id));return ids.length;},
@@ -39,6 +41,13 @@ if (process.type === 'renderer') {
     try {
       await win.loadFile(path.resolve('out/renderer/index.html'));
       await waitFor(`document.querySelector('.stat-card:last-child strong')?.textContent==='3'`);
+      await evaluate(`window.fixture.batch(['plain','failed'])`);
+      await waitFor(`Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='停止本次发布')`);
+      await click('停止本次发布');
+      await waitFor(`window.fixture.cancelled && Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='正在停止…' && b.disabled)`);
+      await evaluate(`window.fixture.finishCancel()`);
+      await waitFor(`!Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='正在停止…') && document.querySelector('.notice')?.textContent.includes('本次发布已停止')`);
+      console.log('PASS: batch stop button calls cancellation, disables while stopping, and displays the outcome');
       await click('全选');
       await waitFor(`document.querySelectorAll('.image-card[aria-pressed="true"]').length===3`);
       await click('清空选择');

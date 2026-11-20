@@ -19,6 +19,13 @@ const api = {
   closePlatformBrowser: (platform: Platform): Promise<void> => ipcRenderer.invoke("browser:close", platform),
   openPlatformBrowser: (platform: Platform): Promise<void> => ipcRenderer.invoke("browser:open", platform),
   publishDrafts: (ids: string[]): Promise<Draft[]> => ipcRenderer.invoke("browser:publish", ids),
+  cancelPublishBatch: (): Promise<void> => ipcRenderer.invoke("browser:cancel-publish"),
+  getPublishBatch: (): Promise<string[]> => ipcRenderer.invoke("browser:publish-batch"),
+  onPublishBatch: (callback: (ids: string[]) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, ids: string[]) => callback(ids);
+    ipcRenderer.on("publish:batch", listener);
+    return () => ipcRenderer.removeListener("publish:batch", listener);
+  },
   resolvePublish: (id: string, published: boolean): Promise<void> => ipcRenderer.invoke("browser:resolve", id, published),
   onPublishProgress: (callback: (draft: Draft) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, draft: Draft) => callback(draft);

@@ -512,7 +512,7 @@ async def main():
                         if shutdown in done:
                             operation.cancel()
                             await asyncio.gather(operation, return_exceptions=True)
-                            publisher.log('task.interrupted', '桌面应用已退出，发布操作已中止；若已提交请核对平台结果', request, 'warn')
+                            publisher.log('task.interrupted', '桌面连接已关闭，发布操作已中止；若已提交请核对平台结果', request, 'warn')
                             break
                         shutdown.cancel()
                         await asyncio.gather(shutdown, return_exceptions=True)

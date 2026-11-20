@@ -22,9 +22,9 @@ const PLATFORM_META: Record<Platform, { label: string; url: string; icon: typeof
   facebook: { label: "Facebook", url: "https://www.facebook.com/", icon: Facebook, color: "#1877F2" },
   bluesky: { label: "Bluesky", url: "https://bsky.app/", icon: Twitter, color: "#0085FF" },
   instagram: { label: "Instagram", url: "https://www.instagram.com/", icon: Instagram, color: "#E879A6" },
-  x: { label: "X", url: "https://x.com/compose/post", icon: Twitter, color: "#D8DEE9" },
+  x: { label: "X", url: "https://x.com/", icon: Twitter, color: "#D8DEE9" },
   pinterest: { label: "Pinterest", url: "https://www.pinterest.com/", icon: Aperture, color: "#E35D68" },
-  tiktok: { label: "TikTok", url: "https://www.tiktok.com/tiktokstudio/upload", icon: Music2, color: "#25F4EE" }
+  tiktok: { label: "TikTok", url: "https://www.tiktok.com/", icon: Music2, color: "#25F4EE" }
 };
 
 function App() {
@@ -49,6 +49,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [busyText, setBusyText] = useState("");
   const [publishingIds, setPublishingIds] = useState<string[]>([]);
+  const [cancellingPublish, setCancellingPublish] = useState(false);
   const publishingRef = useRef(false);
   const publishing = publishingIds.length > 0;
   const [notice, setNotice] = useState("");
@@ -66,7 +67,6 @@ function App() {
     if (publishingRef.current || busy || !canSubmitSelection) return;
     const ids = selectedDrafts.map(draft => draft.id);
     publishingRef.current = true;
-    setPublishingIds(ids);
     setNotice("");
     try {
     if (selectedDraft && ids.includes(selectedDraft.id)) {
@@ -160,10 +160,13 @@ function App() {
       setNotice(`发布提醒：${draft.platform} 草稿已到提醒时间，请手动提交。`);
       void refresh();
     });
+    let receivedBatch = false;
+    const offBatch = window.reach.onPublishBatch(ids => { receivedBatch = true; setPublishingIds(ids); });
+    void window.reach.getPublishBatch().then(ids => { if (!receivedBatch) setPublishingIds(ids); }).catch(error => setNotice(error.message));
     const offProgress = window.reach.onPublishProgress((draft) => {
       setDrafts((old) => old.map((item) => item.id === draft.id ? draft : item));
     });
-    return () => { off(); offProgress(); };
+    return () => { off(); offProgress(); offBatch(); };
   }, []);
 
   useEffect(() => {
@@ -365,6 +368,22 @@ function App() {
           <Settings size={17}/> 设置与账号
         </button>
         <button className={`nav-item ${page === "logs" ? "active" : ""}`} onClick={() => { setLogDraftId(""); setPage("logs"); }}><ListChecks size={17}/> 运行日志</button>
+        <nav className="platform-shortcuts" aria-label="平台快捷入口">
+          <div className="workspace-label">平台快捷入口</div>
+          <p>打开平台专用浏览器，沿用该平台账号。使用后点击保存并关闭。</p>
+          <div className="platform-shortcut-grid">
+            {Object.entries(PLATFORM_META).map(([platform, meta]) => {
+              const Icon = meta.icon;
+              return <div key={platform}>
+                <button className="platform-shortcut-open" disabled={browserBusy} title={`打开 ${meta.label} 专用浏览器`} onClick={() => void runBusy(`正在打开 ${meta.label} 专用浏览器…`, () => window.reach.openPlatformBrowser(platform as Platform))}><Icon size={15} style={{ color: meta.color }}/><span>{meta.label}</span><ArrowUpRight size={12}/></button>
+                <button className="platform-shortcut-close" disabled={browserBusy} aria-label={`保存并关闭 ${meta.label} 浏览器`} onClick={() => void runBusy(`正在保存 ${meta.label} 登录状态…`, async () => {
+                  await window.reach.closePlatformBrowser(platform as Platform);
+                  setNotice(`${meta.label} 浏览器已关闭，登录配置已保存。`);
+                })}>保存并关闭</button>
+              </div>;
+            })}
+          </div>
+        </nav>
         <div className="sidebar-bottom">
           <div className="local-card">
             <div className="local-icon"><CheckCircle2 size={16}/></div>
@@ -386,7 +405,15 @@ function App() {
         <div className="content">
           {notice && <div className="notice"><CircleHelp size={16}/><span>{notice}</span><button onClick={() => setNotice("")}><X size={15}/></button></div>}
           {busy && <div className="busy-bar"><Loader2 className="spin" size={15}/>{busyText}</div>}
-          {publishing && <div className="busy-bar" role="status"><Loader2 className="spin" size={15}/>正在后台发布 {publishingIds.length} 条草稿，可继续浏览素材、设置和日志。当前批次及关联文案暂时锁定。</div>}
+          {publishing && <div className="busy-bar" role="status"><Loader2 className="spin" size={15}/><span>{cancellingPublish ? "正在停止发布并关闭发布窗口…" : `正在后台发布 ${publishingIds.length} 条草稿，当前批次及关联文案暂时锁定。`} 已提交的内容需到平台核对。</span><button className="button danger small" disabled={cancellingPublish} onClick={async () => {
+            setCancellingPublish(true);
+            try {
+              await window.reach.cancelPublishBatch();
+              setDrafts(await window.reach.listDrafts());
+              setNotice("本次发布已停止。尚未提交的任务可重新选择发布；已提交的任务请先到平台核对结果。");
+            } catch (error) { setNotice(error instanceof Error ? error.message : "停止发布失败，请查看运行日志"); }
+            finally { setCancellingPublish(false); }
+          }}>{cancellingPublish ? "正在停止…" : "停止本次发布"}</button></div>}
 
           {page === "logs" && <RunLogs draftId={logDraftId}/> }
           {page === "history" && <PublishHistory records={publishRecords} images={images} platforms={PLATFORM_META} busy={busy} isLocked={draftLocked} onDelete={deletePublishRecords} onLogs={id => { setLogDraftId(id); setPage("logs"); }}/>}

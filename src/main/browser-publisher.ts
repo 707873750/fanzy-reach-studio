@@ -15,6 +15,7 @@ import { publisherCommand, macSessionKey } from "./publisher-runtime";
 type Result = { state: "opened" | "succeeded" | "needs_attention" | "uncertain" | "local_scheduled"; message?: string; url?: string };
 let busy = false;
 const locked = new Set<string>();
+let activeBatch: { cancelled: boolean; platforms: Set<Platform>; done: Promise<void>; finish: () => void; shutdown?: Promise<unknown> } | undefined;
 
 export function getBrowserSettings(): BrowserSettings {
   return { showBrowser: getStore().settings.showBrowser === true, channel: "chrome" };
@@ -33,6 +34,11 @@ function browserOptions() {
 
 export function assertNotPublishing(id: string) {
   if (locked.has(id)) throw new Error("草稿正在发布队列中，请等待当前批次完成。");
+}
+
+export function getPublishBatch(): string[] { return activeBatch ? [...locked] : []; }
+function notifyBatch() {
+  for (const window of BrowserWindow.getAllWindows()) window.webContents.send("publish:batch", getPublishBatch());
 }
 
 function notify(draft: Draft) {
@@ -62,7 +68,7 @@ function createPlatformClient() {
     const fail = () => {
       if (worker !== child) return;
       worker = undefined;
-      pending?.reject(new Error(intentionallyStopping ? "应用正在退出，发布任务已中断。请核对任务状态后再重试。" : "发布进程意外停止，请查看运行日志中的具体错误后重试。"));
+      pending?.reject(new Error(intentionallyStopping ? "发布任务已中断，请核对任务状态后再重试。" : "发布进程意外停止，请查看运行日志中的具体错误后重试。"));
       pending = undefined;
     };
     child.on("error", error => { void log({ source: "app", level: "error", step: "python.spawn_failed", message: "Python 启动失败", detail: errorDetail(error) }); fail(); });
@@ -83,7 +89,7 @@ function createPlatformClient() {
         if (message.type === "submitting") {
           const current = pending;
           await current.checkpoint();
-          if (pending === current) child.stdin.write(JSON.stringify({ ack: "persisted" }) + "\n");
+          if (pending === current && !intentionallyStopping) child.stdin.write(JSON.stringify({ ack: "persisted" }) + "\n");
         } else if (message.type === "result") {
           const current = pending;
           pending = undefined;
@@ -120,12 +126,17 @@ function createPlatformClient() {
     });
   }
 
-  async function stop() {
+  async function stop(timeout = 90000) {
     intentionallyStopping = true;
     const child = worker;
     if (!child || child.exitCode !== null) return;
     await new Promise<void>(resolve => {
-      const timer = setTimeout(() => { child.kill(); resolve(); }, 90000);
+      const timer = setTimeout(() => {
+        child.kill();
+        pending?.reject(new Error("发布任务已中断，请核对任务状态后再重试。"));
+        pending = undefined;
+        resolve();
+      }, timeout);
       child.once("exit", () => { clearTimeout(timer); resolve(); });
       child.stdin.end();
     });
@@ -176,7 +187,11 @@ export async function publishDrafts(ids: string[], localDue = false) {
     return draft;
   });
   busy = true;
+  let finish!: () => void;
+  const batch = { cancelled: false, platforms: new Set<Platform>(), done: new Promise<void>(resolve => { finish = resolve; }), finish: () => finish(), shutdown: undefined as Promise<unknown> | undefined };
+  activeBatch = batch;
   drafts.forEach((draft) => locked.add(draft.id));
+  notifyBatch();
   setPerformancePublishing(true);
   void log({ source: "app", level: "info", step: "batch.start", message: `开始跨平台并行发布，共 ${drafts.length} 条草稿；同平台依次执行` });
   const blocked = new Set<Platform>();
@@ -185,6 +200,10 @@ export async function publishDrafts(ids: string[], localDue = false) {
   try {
     const results = await Promise.allSettled([...groups.values()].map(async platformDrafts => {
       for (const draft of platformDrafts) {
+        if (batch.cancelled) {
+          await record(draft.id, "needs_attention", "本次发布已停止，此任务尚未提交，可重新选择发布。");
+          continue;
+        }
         if (blocked.has(draft.platform)) {
           await record(draft.id, "needs_attention", "此平台的上一条任务需要处理，当前任务尚未提交。");
           continue;
@@ -200,10 +219,14 @@ export async function publishDrafts(ids: string[], localDue = false) {
           updateDraftRecord(draft.id, {scheduleMode: nativeScheduledAt ? "native" : localDue ? "local" : null});
           if (localDue) updateDraftRecord(draft.id, {status:"ready"});
           await record(draft.id, "running", "正在准备素材并打开平台…");
+          if (batch.cancelled) throw new Error("本次发布已停止，此任务尚未提交。");
           const { files, mediaType } = await prepareDraft(draft.id, false);
+          if (batch.cancelled) throw new Error("本次发布已停止，此任务尚未提交。");
           void log({ source: "app", level: "info", step: "images.prepared", message: `已准备 ${draft.imageIds.length} 项平台素材`, draftId: draft.id, platform: draft.platform });
           if (files.length !== draft.imageIds.length) throw new Error("已准备的素材数量与草稿不一致");
+          batch.platforms.add(draft.platform);
           const result = await request({ action: "publish", ...draft, mediaType, xScheduledAt: draft.platform === "x" ? nativeScheduledAt : null, nativeScheduledAt, files, ...browserOptions() }, async () => {
+            if (batch.cancelled) throw new Error("本次发布已停止，未允许提交。");
             submittedAt = new Date().toISOString();
             await record(draft.id, "uncertain", "正在提交，确认结果前请勿重试。", submittedAt);
           });
@@ -220,7 +243,7 @@ export async function publishDrafts(ids: string[], localDue = false) {
           }
         } catch (error) {
           void log({ source: "app", level: submittedAt ? "warn" : "error", step: submittedAt ? "task.uncertain" : "task.failed", message: submittedAt ? "已提交，结果待确认" : "发布任务失败", detail: errorDetail(error), draftId: draft.id, platform: draft.platform });
-          await record(draft.id, submittedAt ? "uncertain" : "needs_attention", submittedAt ? "已提交，结果待确认" : error instanceof Error ? error.message : "浏览器操作失败", submittedAt);
+          await record(draft.id, submittedAt ? "uncertain" : "needs_attention", batch.cancelled ? submittedAt ? "发布已中断，提交结果待确认，请到平台核对后再操作。" : "本次发布已停止，此任务尚未提交，可重新选择发布。" : submittedAt ? "已提交，结果待确认" : error instanceof Error ? error.message : "浏览器操作失败", submittedAt);
           blocked.add(draft.platform);
         }
       }
@@ -228,7 +251,29 @@ export async function publishDrafts(ids: string[], localDue = false) {
     const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (failure) throw failure.reason;
     return drafts;
-  } finally { locked.clear(); busy = false; setPerformancePublishing(false); void log({ source: "app", level: "info", step: "batch.finished", message: `批次结束：${drafts.filter(d => d.status === "published").length}/${drafts.length} 已发布` }); }
+  } finally {
+    await batch.shutdown;
+    locked.clear(); busy = false; activeBatch = undefined; batch.finish();
+    notifyBatch();
+    setPerformancePublishing(false);
+    void log({ source: "app", level: "info", step: "batch.finished", message: `批次${batch.cancelled ? "已停止" : "结束"}：${drafts.filter(d => d.status === "published").length}/${drafts.length} 已发布` });
+  }
+}
+
+export async function cancelPublishBatch() {
+  const batch = activeBatch;
+  if (!batch) return;
+  if (!batch.cancelled) {
+    batch.cancelled = true;
+    void log({ source: "app", level: "warn", step: "batch.cancel", message: "用户停止本次发布；已提交的任务需要核对平台结果。" });
+    const running = [...batch.platforms].flatMap(platform => {
+      const client = clients.get(platform);
+      clients.delete(platform);
+      return client ? [client] : [];
+    });
+    batch.shutdown = Promise.all(running.map(client => client.stop(10000)));
+  }
+  await batch.done;
 }
 
 export async function resolvePublish(id: string, published: boolean) {

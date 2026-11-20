@@ -22,6 +22,18 @@ button { cursor: pointer; }
 .nav-item.active { box-shadow: inset 2px 0 #9a83ff; }
 .nav-count { margin-left: auto; color: #b9aaff; font-size: 11px; }
 .sidebar-bottom { margin-top: auto; }
+.platform-shortcuts { border-top: 1px solid #252630; margin: 18px 0 24px; padding-top: 18px; }
+.platform-shortcuts .workspace-label { padding-bottom: 0; }
+.platform-shortcuts > p { margin: 6px 10px 12px; color: #898b99; font-size: 11px; }
+.platform-shortcut-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.platform-shortcut-open { width: 100%; border: 0; background: transparent; display: flex; align-items: center; gap: 5px; padding: 9px 6px; border-radius: 7px; color: #c5c6d2; font-size: 11px; }
+.platform-shortcut-open:hover:not(:disabled) { background: #282438; color: #fff; }
+.platform-shortcut-grid button:focus-visible { outline: 2px solid #9a83ff; outline-offset: 2px; }
+.platform-shortcut-open > svg { flex-shrink: 0; }
+.platform-shortcut-open > svg:last-child { margin-left: auto; color: #898b99; }
+.platform-shortcut-close { border: 0; background: transparent; color: #a6a7b5; font-size: 10px; padding: 3px 6px 8px; }
+.platform-shortcut-close:hover:not(:disabled) { color: #fff; }
+.platform-shortcut-grid button:disabled { opacity: .45; cursor: not-allowed; }
 .local-card { border: 1px solid #30313b; background: #1a1b23; border-radius: 10px; padding: 12px; display: flex; gap: 9px; align-items: flex-start; }
 .local-icon { color: #66c99a; }
 .local-card strong,.local-card span { display: block; }
