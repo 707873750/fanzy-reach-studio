@@ -70,7 +70,7 @@ button { cursor: pointer; }
 .empty-icon { width: 48px; height: 48px; border-radius: 14px; background: #29243d; color: #a997ff; display: grid; place-items: center; }
 .empty-state h3 { margin: 14px 0 5px; font: 700 14px "Segoe UI",sans-serif; }
 .empty-state p { margin: 0 0 15px; color: #858796; font-size: 11px; }
-.image-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(145px,1fr)); gap: 12px; }
+.image-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(145px,1fr)); grid-auto-rows: max-content; align-content: start; gap: 12px; max-height: min(360px,40vh); overflow-y: auto; scrollbar-gutter: stable; padding: 2px; }
 .library-actions { align-items: center; margin-bottom: 16px; }
 .delete-file-list { max-height: 120px; overflow: auto; padding-left: 22px; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
 .image-card:disabled { cursor: not-allowed; opacity: .6; }
@@ -175,3 +175,14 @@ button { cursor: pointer; }
 .log-row details { font-size:10px; color:#a5a6b3; }
 .log-row summary { cursor:pointer; }
 .log-row pre { white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; line-height:1.6; }
+
+.caption-toolbar { display: flex; flex-wrap: wrap; gap: 4px; padding: 7px; border: 1px solid #373844; border-radius: 7px 7px 0 0; background: #20212c; }
+.caption-toolbar button { background: #303140; color: #eee; border: 0; border-radius: 4px; padding: 5px 8px; cursor: pointer; font-size: 11px; }
+.caption-toolbar button:disabled { opacity: .4; cursor: default; }
+.caption-rich-input { border: 1px solid #373844; border-top: 0; border-radius: 0 0 7px 7px; padding: 10px 11px; background: #13141b; color: #eee; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; outline: none; }
+.caption-rich-input:focus { border-color: #8270e8; }
+.caption-rich-input:empty::before { content: attr(data-placeholder); color: #888; pointer-events: none; }
+.caption-rich-input[aria-disabled="true"] { opacity: .6; }
+.caption-rich-input a, .caption-rich-record a { color: #b4a2ff; text-decoration: underline; }
+.caption-rich-input ul, .caption-rich-input ol, .caption-rich-record ul, .caption-rich-record ol { padding-left: 24px; }
+.caption-link-controls { margin-top: 8px; }

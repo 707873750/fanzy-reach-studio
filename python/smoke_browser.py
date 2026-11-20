@@ -41,17 +41,17 @@ with sync_playwright() as p, tempfile.TemporaryDirectory() as folder:
     page.goto(f"http://127.0.0.1:{server.server_port}")
     page.get_by_role("button", name="发布队列").click()
     page.locator('.draft-row').click()
-    page.get_by_label('X 定时发布时间',exact=False).fill('2030-06-15T12:34')
+    page.get_by_label('定时发布时间',exact=False).fill('2030-06-15T12:34')
     page.get_by_role('button', name='保存修改').click()
-    page.wait_for_function('window.savedPatch?.xScheduledAt')
-    assert page.evaluate("new Date(window.savedPatch.xScheduledAt).getHours()") == 12
-    assert page.evaluate("new Date(window.savedPatch.xScheduledAt).getMinutes()") == 34
-    page.get_by_label('X 定时发布时间',exact=False).fill('')
+    page.wait_for_function('window.savedPatch?.publishAt')
+    assert page.evaluate("new Date(window.savedPatch.publishAt).getHours()") == 12
+    assert page.evaluate("new Date(window.savedPatch.publishAt).getMinutes()") == 34
+    page.get_by_label('定时发布时间',exact=False).fill('')
     page.get_by_role('button', name='保存修改').click()
-    page.wait_for_function('window.savedPatch?.xScheduledAt === null')
+    page.wait_for_function('window.savedPatch?.publishAt === null')
     page.get_by_role("checkbox").check()
     page.get_by_role("button", name="提交选中的 1 条").click()
-    page.get_by_text("已发布 1/1 条；X 已排程 0 条。重试前请核对各任务结果。").wait_for()
+    page.get_by_text("已发布 1/1 条；本地待发布 0 条；平台已排程 0 条。重试前请核对各任务结果。").wait_for()
     page.get_by_role("button", name="设置与账号").click()
     page.get_by_label('显示浏览器',exact=False).check()
     page.wait_for_function('window.browserSettings.showBrowser === true')
@@ -69,7 +69,8 @@ with sync_playwright() as p, tempfile.TemporaryDirectory() as folder:
     page.get_by_label('默认图板名称',exact=True).fill('test')
     page.get_by_role('button',name='保存 Pinterest 配置',exact=True).click()
     page.wait_for_function("window.platformDefaults.pinterest.boardName === 'test'")
-    page.get_by_label('默认发布方式',exact=True).select_option('later')
+    assert page.get_by_label('默认发布方式',exact=True).count() == 5
+    page.locator('#default-x-schedule').select_option('later')
     page.get_by_label('创建草稿后延后多少分钟',exact=True).fill('90')
     page.get_by_role('button',name='保存 X 配置',exact=True).click()
     page.wait_for_function('window.platformDefaults.x.scheduleDelayMinutes === 90')
@@ -158,7 +159,7 @@ with sync_playwright() as p, tempfile.TemporaryDirectory() as folder:
     page.get_by_label('搜索步骤、错误或任务 ID').fill('control.failed')
     assert page.locator('.log-row').count() == 1
     page.evaluate("window.finishPublish([{...window.interactiveDrafts[0],status:'published'}])")
-    page.get_by_text('已发布 1/1 条；X 已排程 0 条。重试前请核对各任务结果。',exact=True).wait_for()
+    page.get_by_text('已发布 1/1 条；本地待发布 0 条；平台已排程 0 条。重试前请核对各任务结果。',exact=True).wait_for()
     page.wait_for_function("!document.body.innerText.includes('正在后台发布')")
     page.get_by_role('button',name='发布队列',exact=False).click()
     page.locator('.draft-select-row input').first.check()

@@ -1,14 +1,14 @@
 """Validation of prepared media before browser publishing."""
 from pathlib import Path
 
-URLS = {"bluesky": "https://bsky.app/intent/compose", "x": "https://x.com/compose/post", "instagram": "https://www.instagram.com/", "pinterest": "https://www.pinterest.com/pin-creation-tool/", "tiktok": "https://www.tiktok.com/tiktokstudio/upload"}
+URLS = {"facebook": "https://www.facebook.com/", "bluesky": "https://bsky.app/intent/compose", "x": "https://x.com/compose/post", "instagram": "https://www.instagram.com/", "pinterest": "https://www.pinterest.com/pin-creation-tool/", "tiktok": "https://www.tiktok.com/tiktokstudio/upload"}
 
 def validate(job):
     platform = job.get("platform")
     if platform not in URLS:
         raise ValueError("Unsupported platform")
     files = job.get("files", [])
-    limit = {"bluesky": 4, "x": 4, "instagram": 10, "pinterest": 1, "tiktok": 35}[platform]
+    limit = {"facebook": 10, "bluesky": 4, "x": 4, "instagram": 10, "pinterest": 1, "tiktok": 35}[platform]
     if not 1 <= len(files) <= limit or any(not Path(f).is_file() for f in files):
         raise ValueError("Missing images or invalid image count")
     if platform == "tiktok":

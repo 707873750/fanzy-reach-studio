@@ -21,6 +21,7 @@ from bluesky_confirmation import BlueskyConfirmation
 ADAPTER_PATH = Path(__file__).with_name('page_adapter.js')
 CHANNELS = ('msedge', 'chrome', 'chromium')
 LOGIN_URLS = {
+    'facebook': 'https://www.facebook.com/',
     'bluesky': 'https://bsky.app/',
     'x': 'https://x.com/i/flow/login',
     'instagram': 'https://www.instagram.com/',
@@ -205,7 +206,7 @@ class Publisher:
                 page = context.pages[0] if context.pages else await context.new_page()
                 if job['platform'] == 'bluesky':
                     confirmation = BlueskyConfirmation(page, job)
-                elif job['platform'] == 'pinterest':
+                elif job['platform'] == 'pinterest' and not job.get('nativeScheduledAt'):
                     confirmation = PinterestConfirmation(page)
                 elif job['platform'] == 'tiktok':
                     confirmation = TikTokConfirmation(page, lambda detail: self.log('tiktok.confirmation_response', '本次提交后的响应结构（不记录正文、凭据或查询参数）', job, detail=detail))
@@ -260,6 +261,23 @@ class Publisher:
                         else:
                             await control.press('Backspace')
                     await page.expose_binding('fanzyTikTokInput', type_tiktok)
+                if job['platform'] == 'facebook':
+                    async def facebook_input(source):
+                        if source['frame'] != page.main_frame or urlsplit(page.url).netloc != 'www.facebook.com':
+                            raise ValueError('Invalid Facebook input source')
+                        editor = page.locator('[data-fanzy-facebook-editor="true"]')
+                        if await editor.count() != 1:
+                            raise ValueError('Facebook 文案框已变化')
+                        await editor.click()
+                        await editor.press('ControlOrMeta+A')
+                        await editor.press('Backspace')
+                        text = '\n\n'.join(part for part in [job.get('title', ''), job.get('caption', ''), ' '.join(job['hashtags'])] if part)
+                        for index, line in enumerate(text.replace('\r\n', '\n').split('\n')):
+                            if index:
+                                await page.keyboard.press('Shift+Enter')
+                            if line:
+                                await page.keyboard.insert_text(line)
+                    await page.expose_binding('fanzyFacebookInput', facebook_input)
                 self.log('page.open', '打开平台发布页面', job)
                 await self.open_publish_page(page, job)
                 expected = urlsplit(URLS[job['platform']]).netloc
@@ -276,7 +294,9 @@ class Publisher:
                     path = Path(file)
                     self.log('asset.load', f'读取图片 {index+1}/{job["fileCount"]}', job)
                     await phase('asset', {'name': path.name, 'type': 'image/jpeg', 'data': base64.b64encode(path.read_bytes()).decode('ascii')})
-                await phase('prepare')
+                prepared = await phase('prepare')
+                if prepared and prepared.get('state') == 'local_scheduled':
+                    return prepared
                 checkpoint_requested = True
                 self.log('submit.checkpoint_requested', '等待桌面端保存提交检查点', job)
                 if not await checkpoint():
@@ -292,7 +312,7 @@ class Publisher:
                     self.log('task.uncertain', '已提交，结果待确认', job, 'warn')
                     await self.capture_result(page, request, job, pending=True)
                     return {'state':'uncertain','message':'已提交，结果待确认'}
-                return {'state': 'succeeded', 'message': ('X 已确认定时排程：'+job['xScheduledAt']+'。修改或取消请前往 X。') if job.get('xScheduledAt') else ('TikTok 已确认提交作品；审核状态与可见范围请以平台为准。' if job['platform']=='tiktok' else '平台已显示发布成功确认。')}
+                return {'state': 'succeeded', 'message': ('平台已确认定时排程：'+(job.get('nativeScheduledAt') or job['xScheduledAt'])+'。修改或取消请前往平台。') if (job.get('nativeScheduledAt') or job.get('xScheduledAt')) else ('TikTok 已确认提交作品；审核状态与可见范围请以平台为准。' if job['platform']=='tiktok' else '平台已显示发布成功确认。')}
             return await asyncio.wait_for(execute(), timeout=180)
         except Exception as error:
             if confirmation and getattr(confirmation, 'confirmed', False):

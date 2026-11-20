@@ -60,6 +60,36 @@ class PlaywrightPublishingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await page.evaluate('window.clicks || 0'), 0)
         return True
 
+    async def test_native_pinterest_schedule(self):
+        self.fixture['pinterest'] = PINTEREST.replace('>Publish</button>', '>Schedule</button>').replace('Your Pin has been published.', 'Your Pin has been scheduled.').replace('</body>', '''
+          <input type="checkbox" aria-label="Publish at a later date">
+          <input type="date" aria-label="Date"><input type="time" aria-label="Time"></body>''')
+        target = datetime.now(timezone.utc) + timedelta(hours=2)
+        async def checkpoint():
+            page = self.context.pages[0]
+            expected = await page.evaluate('(iso)=>{const d=new Date(iso);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16)}', target.isoformat())
+            self.assertEqual(await page.locator('input[type=date]').input_value(), expected[:10])
+            self.assertEqual(await page.locator('input[type=time]').input_value(), expected[11:])
+            return await self.checkpoint()
+        result = await self.runner.publish({**self.job, 'platform':'pinterest', 'nativeScheduledAt':target.isoformat()}, checkpoint)
+        self.assertEqual(result['state'], 'succeeded', result)
+        self.assertIn(target.isoformat(), result['message'])
+
+    async def test_missing_native_schedule_falls_back_without_submission(self):
+        for platform in ('instagram', 'pinterest'):
+            with self.subTest(platform=platform):
+                checkpoint = AsyncMock(return_value=True)
+                result = await self.runner.publish({**self.job, 'platform':platform, 'nativeScheduledAt':(datetime.now(timezone.utc)+timedelta(hours=2)).isoformat()}, checkpoint)
+                self.assertEqual(result['state'], 'local_scheduled', result)
+                checkpoint.assert_not_awaited()
+
+    async def test_unknown_native_picker_falls_back_without_submission(self):
+        self.fixture['pinterest'] = PINTEREST.replace('</body>', '<button>Publish at a later date</button><input aria-label="Date"></body>')
+        checkpoint = AsyncMock(return_value=True)
+        result = await self.runner.publish({**self.job, 'platform':'pinterest', 'nativeScheduledAt':(datetime.now(timezone.utc)+timedelta(hours=2)).isoformat()}, checkpoint)
+        self.assertEqual(result['state'], 'local_scheduled', result)
+        checkpoint.assert_not_awaited()
+
     async def test_platforms_and_visible_setting(self):
         for platform in ('x', 'instagram', 'pinterest'):
             result = await self.runner.publish({**self.job,'platform':platform,'showBrowser':platform=='instagram'}, self.checkpoint)

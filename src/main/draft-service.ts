@@ -10,6 +10,7 @@ import { readPlatformDefaults } from "../shared/platform-defaults";
 import { canDeleteDraft, canDeletePublishRecord } from "../shared/draft-lifecycle";
 
 const PLATFORM_URLS: Record<Platform, string> = {
+  facebook: "https://www.facebook.com/",
   bluesky: "https://bsky.app/intent/compose",
   instagram: "https://www.instagram.com/",
   x: "https://x.com/compose/post",
@@ -18,6 +19,7 @@ const PLATFORM_URLS: Record<Platform, string> = {
 };
 
 const PLATFORM_SIZES: Record<Platform, { width: number; height: number }> = {
+  facebook: { width: 2048, height: 2048 },
   bluesky: { width: 1600, height: 1600 },
   instagram: { width: 1080, height: 1350 },
   x: { width: 1600, height: 900 },
@@ -38,10 +40,12 @@ export async function createDrafts(imageIds: string[], platforms: Platform[], co
   const defaults = readPlatformDefaults(store.settings.platformDefaults);
   const createdTime = Date.now();
   if (copy && (typeof copy.sharedCaption !== "string" || !copy.platforms)) throw new Error("无效的文案配置");
+  if (copy?.sharedCaptionHtml !== undefined && (typeof copy.sharedCaptionHtml !== "string" || copy.sharedCaptionHtml.length > 100000)) throw new Error("无效的富文本文案");
   const copyGroupId = crypto.randomUUID();
   const sharedCaption = (copy?.sharedCaption || "").slice(0, 5000);
   for (const platform of new Set(platforms)) {
     const option = copy?.platforms[platform];
+    if (option?.captionHtml !== undefined && (typeof option.captionHtml !== "string" || option.captionHtml.length > 100000)) throw new Error("无效的富文本文案");
     if (option && (!["shared", "independent"].includes(option.mode) || typeof option.caption !== "string")) throw new Error("无效的平台文案配置");
   }
   for (const platform of new Set(platforms)) {
@@ -58,9 +62,13 @@ export async function createDrafts(imageIds: string[], platforms: Platform[], co
         tiktokPrivacy: platform === "tiktok" ? config.tiktokPrivacy : undefined,
         boardName: platform === "pinterest" ? config.boardName : undefined,
         xScheduledAt: platform === "x" && config.scheduleDelayMinutes ? new Date(createdTime + config.scheduleDelayMinutes * 60000).toISOString() : null,
+        publishAt: config.scheduleDelayMinutes ? new Date(createdTime + config.scheduleDelayMinutes * 60000).toISOString() : null,
         copyGroupId,
         captionMode: copy?.platforms[platform]?.mode || "independent",
         sharedCaption,
+        sharedCaptionHtml: copy?.sharedCaptionHtml,
+        independentCaptionHtml: copy?.platforms[platform]?.captionHtml,
+        captionHtml: copy?.platforms[platform]?.mode === "shared" ? copy.sharedCaptionHtml : copy?.platforms[platform]?.captionHtml,
         independentCaption: (copy?.platforms[platform]?.caption || "").slice(0, 5000),
         caption: copy?.platforms[platform]?.mode === "shared" ? sharedCaption : (copy?.platforms[platform]?.caption || "").slice(0, 5000),
         hashtags: [...config.hashtags],
@@ -85,6 +93,7 @@ export async function listDrafts() {
 }
 
 export async function updateDraft(draftId: string, patch: DraftPatch) {
+  if (patch.publishAt === undefined && patch.xScheduledAt !== undefined) patch = {...patch, publishAt:patch.xScheduledAt};
   const allowed: Partial<Draft> = {};
   const existing = findDraft(draftId);
   if (!existing) throw new Error("未找到草稿");
@@ -103,11 +112,23 @@ export async function updateDraft(draftId: string, patch: DraftPatch) {
     if (existing.platform !== "tiktok" || !["public", "self_only"].includes(patch.tiktokPrivacy)) throw new Error("无效的 TikTok 隐私设置");
     allowed.tiktokPrivacy = patch.tiktokPrivacy;
   }
+  if (patch.publishAt !== undefined) {
+    const time = patch.publishAt === null ? null : Date.parse(patch.publishAt);
+    const unchanged = patch.publishAt === (existing.publishAt || existing.xScheduledAt || null);
+    if (time !== null && (typeof patch.publishAt !== "string" || !Number.isFinite(time) || (!unchanged && time < Date.now() + 300000))) throw new Error("定时发布时间必须至少在 5 分钟以后");
+    allowed.publishAt = time === null ? null : new Date(time).toISOString();
+    allowed.xScheduledAt = existing.platform === "x" ? allowed.publishAt : null;
+    if (!unchanged) {
+      allowed.scheduleMode = null;
+      allowed.browserPublish = undefined;
+      if (existing.status === "local_scheduled") allowed.status = "draft";
+    }
+  }
   if (typeof patch.boardName === "string") allowed.boardName = patch.boardName.trim().slice(0, 200);
   if (typeof patch.title === "string") allowed.title = patch.title.slice(0, 200);
   if (typeof patch.altText === "string") allowed.altText = patch.altText.slice(0, 1000);
   if (Array.isArray(patch.hashtags)) allowed.hashtags = patch.hashtags.filter((tag) => typeof tag === "string").slice(0, 30);
-  if (patch.caption !== undefined || patch.captionMode !== undefined) applyCaptionPatch(getStore().drafts, existing, patch, new Date().toISOString());
+  if (patch.caption !== undefined || patch.captionHtml !== undefined || patch.captionMode !== undefined) applyCaptionPatch(getStore().drafts, existing, patch, new Date().toISOString());
   const draft = updateDraftRecord(draftId, allowed);
   await persistStore();
   return draft;
@@ -152,6 +173,7 @@ export async function deletePublishRecords(recordIds: string[]) {
 export async function prepareDraft(draftId: string, interactive = true) {
   const draft = findDraft(draftId);
   if (!draft) throw new Error("未找到草稿");
+  if (interactive && draft.status === "local_scheduled") throw new Error("请先取消本地定时，再准备手动发布素材");
   if (!draft.imageIds.length) throw new Error("草稿中没有图片");
 
   const outputFolder = path.join(getAppPaths().exports, draft.id);
@@ -224,6 +246,8 @@ export async function markPublished(draftId: string, publishedUrl?: string) {
 }
 
 export async function scheduleDraft(draftId: string, scheduledAt: string) {
+  const existing = findDraft(draftId);
+  if (!existing || !canEditCopy(existing) || existing.status === "local_scheduled") throw new Error("请先取消定时发布或核对发布状态，再设置提醒");
   const date = new Date(scheduledAt);
   if (Number.isNaN(date.getTime()) || date.getTime() <= Date.now()) {
     throw new Error("请选择未来的日期和时间");

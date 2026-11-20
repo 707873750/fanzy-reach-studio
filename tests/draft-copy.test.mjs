@@ -104,6 +104,12 @@ assert.deepEqual(Array.from(blueskyBatch,d=>d.imageIds.length),[4,1]);
 assert.equal(blueskyBatch[0].caption,'Blue sky');
 assert.equal(blueskyBatch[0].platform,'bluesky');
 console.log('PASS: Bluesky defaults migration, photo limits, grouping and shared copy');
+assert.equal(readPlatformDefaults({x:{imagesPerDraft:2}}).facebook.imagesPerDraft,10);
+assert.throws(()=>validatePlatformDefaults('facebook',{...defaultPlatformSettings().facebook,imagesPerDraft:11}));
+const facebookBatch=await svc.createDrafts(data.images.slice(0,11).map(i=>i.id),['facebook'],{sharedCaption:'Facebook photos',platforms:{facebook:{mode:'shared',caption:''}}});
+assert.deepEqual(Array.from(facebookBatch,d=>d.imageIds.length),[10,1]);
+assert.ok(facebookBatch.every(d=>d.caption==='Facebook photos'));
+console.log('PASS: Facebook defaults migration, image limits and shared copy');
 
 // Existing successful records move out of the queue without a data migration.
 const records = [make('published', {status:'published'}), make('platform-scheduled', {status:'platform_scheduled'}),
@@ -167,3 +173,21 @@ data = JSON.parse(persisted);
 assert.equal(JSON.stringify(data.drafts), JSON.stringify([...protectedDrafts, ...editable]), 'history deletion preserves unfinished drafts');
 assert.equal(JSON.stringify(data.images), assetsBefore, 'history deletion preserves library images');
 console.log('PASS: single/bulk history deletion, scheduled records, atomic validation, protected tasks, deduplication and persistence');
+
+const scheduledTime=new Date(Date.now()+3600000).toISOString();
+data.drafts=[make('local-edit',{platform:'bluesky',status:'local_scheduled',publishAt:scheduledTime,scheduleMode:'local'})];
+await svc.updateDraft('local-edit',{caption:'Updated scheduled copy',publishAt:scheduledTime});
+assert.equal(data.drafts[0].status,'local_scheduled','saving unchanged time retains queued job');
+await assert.rejects(svc.scheduleDraft('local-edit',scheduledTime),/取消定时/);
+await svc.updateDraft('local-edit',{publishAt:null});
+assert.equal(data.drafts[0].status,'draft');
+assert.equal(data.drafts[0].publishAt,null);
+assert.equal(data.drafts[0].scheduleMode,null);
+await assert.rejects(svc.updateDraft('local-edit',{publishAt:'bad-date'}),/5 分钟/);
+for(const platform of ['instagram','pinterest','tiktok','bluesky']) {
+  await settingsSvc.savePlatformDefaults(platform,{...defaultPlatformSettings()[platform],scheduleDelayMinutes:60});
+  const created=await svc.createDrafts(['0'],[platform]);
+  assert.ok(Date.parse(created[0].publishAt)>Date.now()+3500000);
+  assert.equal(created[0].status,'draft','defaults never auto-arm a newly created draft');
+}
+console.log('PASS: scheduling defaults on all platforms, persistence, cancellation, reminder isolation and validation');

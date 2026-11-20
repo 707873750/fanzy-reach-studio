@@ -23,6 +23,9 @@ Create one Bluesky post under 280 characters including hashtags. Output JSON:
 {"title":"","caption":"...","hashtags":[],"alt_text":""}
 Keep it concise. Do not invent claims or links.`;
   }
+  if (platform === "facebook") {
+    return `Write a natural English Facebook photo post for ${imageCount} images. Return JSON with caption, title (empty string), hashtags (up to 3), alt_text (empty string). Describe visible facts only.`;
+  }
   if (platform === "instagram") {
     return `${common}
 Create one Instagram carousel caption. Output JSON:
@@ -151,6 +154,8 @@ export async function generateCaption(draftId: string, sharedIds?: string[]): Pr
       const copyGroupId = crypto.randomUUID();
       for (const {item} of sharedDrafts) updateDraftRecord(item.id, {
         copyGroupId, captionMode:"shared", sharedCaption:parsed.caption, caption:parsed.caption,
+        captionHtml:undefined, sharedCaptionHtml:undefined,
+        independentCaptionHtml:item.captionMode === "shared" ? item.independentCaptionHtml : item.captionHtml,
         independentCaption:item.captionMode === "shared" ? item.independentCaption : item.caption,
         status:"ready"
       });
@@ -162,6 +167,7 @@ export async function generateCaption(draftId: string, sharedIds?: string[]): Pr
       title: parsed.title || "",
       caption: parsed.caption || "",
       captionMode: "independent",
+      captionHtml: undefined, independentCaptionHtml: undefined,
       independentCaption: parsed.caption || "",
       hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags : [],
       altText: parsed.alt_text || "",

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowUpRight, CheckCircle2, Trash2 } from "lucide-react";
 import type { Draft, ImageAsset, Platform } from "../../shared/types";
 import { canDeletePublishRecord } from "../../shared/draft-lifecycle";
+import { cleanCaption } from "./rich-caption";
 
 function recordStatus(record: Draft) {
   return record.status === "platform_scheduled" || record.browserPublish?.state === "scheduled" ? "平台已排程" : "已发布";
@@ -63,7 +64,7 @@ export default function PublishHistory({ records, images, platforms, busy, isLoc
       <section className="panel draft-detail">
         <div className="detail-heading"><div><div className="eyebrow">发布记录</div><h2>{platforms[selected.platform].label}</h2><p>{recordStatus(selected)} · {selected.imageIds.length} 张图片</p></div><div className="heading-actions"><button className="text-button" onClick={() => onLogs(selected.id)}>查看任务日志</button><button className="icon-button danger" title="删除当前发布记录" aria-label="删除当前发布记录" disabled={busy || !canDeletePublishRecord(selected) || isLocked(selected)} onClick={() => setPendingIds([selected.id])}><Trash2 size={17}/></button></div></div>
         <p className="muted">记录更新时间：{new Date(selected.updatedAt).toLocaleString()}</p>
-        {selected.xScheduledAt && <p className="muted">平台排程时间：{new Date(selected.xScheduledAt).toLocaleString()}</p>}
+        {(selected.publishAt || selected.xScheduledAt) && <p className="muted">{selected.scheduleMode === "local" ? "本地计划时间" : "平台排程时间"}：{new Date((selected.publishAt || selected.xScheduledAt)!).toLocaleString()}</p>}
         {selected.browserPublish?.message && <p className="muted">{selected.browserPublish.message}</p>}
         <div className="detail-images">{selected.imageIds.map(id => {
           const image = images.find(item => item.id === id);
@@ -71,7 +72,7 @@ export default function PublishHistory({ records, images, platforms, busy, isLoc
         })}</div>
         {selected.imageIds.some(id => !images.some(image => image.id === id)) && <p className="muted">部分图片已从素材库删除，发布记录仍保留。</p>}
         {selected.title && <div className="field"><label>帖子标题 / Pin 标题</label><p className="record-text">{selected.title}</p></div>}
-        <div className="field"><label>正文文案</label><p className="record-text">{selected.caption || "未填写文案"}</p></div>
+        <div className="field"><label>正文文案</label>{selected.captionHtml ? <div className="record-text caption-rich-record" onClick={event => event.preventDefault()} dangerouslySetInnerHTML={{__html:cleanCaption(selected.captionHtml)}}/> : <p className="record-text">{selected.caption || "未填写文案"}</p>}</div>
         {selected.hashtags.length > 0 && <div className="field"><label>话题标签</label><p className="record-text">{selected.hashtags.join(" ")}</p></div>}
         {selected.boardName && <div className="field"><label>Pinterest 图板</label><p className="record-text">{selected.boardName}</p></div>}
         {selected.altText && <div className="field"><label>图片替代说明</label><p className="record-text">{selected.altText}</p></div>}

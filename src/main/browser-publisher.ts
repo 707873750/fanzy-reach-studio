@@ -11,7 +11,7 @@ import type { BrowserSettings, Draft, Platform } from "../shared/types";
 import { log, errorDetail } from "./run-logger";
 import { setPerformancePublishing } from "./performance-monitor";
 
-type Result = { state: "opened" | "succeeded" | "needs_attention" | "uncertain"; message?: string; url?: string };
+type Result = { state: "opened" | "succeeded" | "needs_attention" | "uncertain" | "local_scheduled"; message?: string; url?: string };
 let busy = false;
 const locked = new Set<string>();
 
@@ -139,7 +139,7 @@ function request(payload: {platform: Platform; [key: string]: unknown}, checkpoi
 }
 
 export async function openPlatformBrowser(platform: Platform) {
-  if (!["instagram", "x", "pinterest", "tiktok", "bluesky"].includes(platform)) throw new Error("无效的平台");
+  if (!["instagram", "x", "pinterest", "tiktok", "bluesky", "facebook"].includes(platform)) throw new Error("无效的平台");
   if (busy) throw new Error("请等待当前浏览器操作完成");
   busy = true;
   try {
@@ -150,7 +150,7 @@ export async function openPlatformBrowser(platform: Platform) {
 }
 
 export async function closePlatformBrowser(platform: Platform) {
-  if (!["instagram", "x", "pinterest", "tiktok", "bluesky"].includes(platform)) throw new Error("无效的平台");
+  if (!["instagram", "x", "pinterest", "tiktok", "bluesky", "facebook"].includes(platform)) throw new Error("无效的平台");
   if (busy) throw new Error("请等待当前浏览器操作完成");
   busy = true;
   try {
@@ -159,14 +159,17 @@ export async function closePlatformBrowser(platform: Platform) {
   } finally { busy = false; }
 }
 
-export async function publishDrafts(ids: string[]) {
+export async function publishDrafts(ids: string[], localDue = false) {
   if (busy) throw new Error("已有发布批次正在运行");
   if (!Array.isArray(ids) || !ids.length || ids.length > 100 || ids.some((id) => typeof id !== "string")) throw new Error("请选择 1 至 100 条草稿");
   const drafts = [...new Set(ids)].map((id) => {
     const draft = findDraft(id);
     if (!draft) throw new Error("草稿已不存在");
     if (draft.status === "published" || ["running", "uncertain", "succeeded", "scheduled"].includes(draft.browserPublish?.state || "")) throw new Error("重试前请先核对之前的发布结果");
-    if (draft.xScheduledAt && (draft.platform !== "x" || !Number.isFinite(Date.parse(draft.xScheduledAt)) || Date.parse(draft.xScheduledAt) < Date.now()+300000)) throw new Error("X 定时发布时间必须至少在 5 分钟以后，请重新设置");
+    const time = Date.parse(draft.publishAt || draft.xScheduledAt || "");
+    if (localDue && (draft.status !== "local_scheduled" || !Number.isFinite(time) || time > Date.now())) throw new Error("本地任务尚未到期");
+    if (!localDue && draft.status === "local_scheduled") throw new Error("任务已进入本地队列，请取消后重新提交");
+    if (!localDue && (draft.publishAt || draft.xScheduledAt) && (!Number.isFinite(time) || time < Date.now()+300000)) throw new Error("定时发布时间必须至少在 5 分钟以后");
     return draft;
   });
   busy = true;
@@ -185,18 +188,30 @@ export async function publishDrafts(ids: string[]) {
         }
         let submittedAt: string | undefined;
         try {
+          const publishAt = draft.publishAt || draft.xScheduledAt;
+          if (!localDue && publishAt && ["tiktok", "bluesky", "facebook"].includes(draft.platform)) {
+            updateDraftRecord(draft.id, {status:"local_scheduled", publishAt, scheduleMode:"local", browserPublish:undefined});
+            await persistStore(); notify(draft); continue;
+          }
+          const nativeScheduledAt = !localDue ? publishAt : null;
+          updateDraftRecord(draft.id, {scheduleMode: nativeScheduledAt ? "native" : localDue ? "local" : null});
+          if (localDue) updateDraftRecord(draft.id, {status:"ready"});
           await record(draft.id, "running", "正在准备图片并打开平台…");
           const { folder } = await prepareDraft(draft.id, false);
           void log({ source: "app", level: "info", step: "images.prepared", message: `已准备 ${draft.imageIds.length} 张平台图片`, draftId: draft.id, platform: draft.platform });
           const files = (await fs.readdir(folder)).filter((file) => /^\d+-.*\.jpg$/.test(file)).sort().map((file) => path.join(folder, file));
           if (files.length !== draft.imageIds.length) throw new Error("已准备的图片数量与草稿不一致");
-          const result = await request({ action: "publish", ...draft, files, ...browserOptions() }, async () => {
+          const result = await request({ action: "publish", ...draft, xScheduledAt: draft.platform === "x" ? nativeScheduledAt : null, nativeScheduledAt, files, ...browserOptions() }, async () => {
             submittedAt = new Date().toISOString();
             await record(draft.id, "uncertain", "正在提交，确认结果前请勿重试。", submittedAt);
           });
-          if (result.state === "succeeded") {
-            updateDraftRecord(draft.id, { status: draft.xScheduledAt ? "platform_scheduled" : "published", publishedUrl: result.url || null });
-            await record(draft.id, draft.xScheduledAt ? "scheduled" : "succeeded", result.message || "发布成功", submittedAt);
+          if (result.state === "local_scheduled" && nativeScheduledAt && !submittedAt) {
+            updateDraftRecord(draft.id, {status:"local_scheduled", publishAt:nativeScheduledAt, scheduleMode:"local", browserPublish:undefined});
+            await persistStore(); notify(draft);
+            void log({source:"app",level:"info",step:"schedule.local",message:result.message || "无可用原生排程，已转为本地定时",draftId:draft.id,platform:draft.platform});
+          } else if (result.state === "succeeded") {
+            updateDraftRecord(draft.id, { status: nativeScheduledAt ? "platform_scheduled" : "published", publishedUrl: result.url || null });
+            await record(draft.id, nativeScheduledAt ? "scheduled" : "succeeded", result.message || "发布成功", submittedAt);
           } else {
             await record(draft.id, submittedAt ? "uncertain" : "needs_attention", result.message || "请检查浏览器页面", submittedAt);
             blocked.add(draft.platform);
@@ -220,8 +235,9 @@ export async function resolvePublish(id: string, published: boolean) {
   const draft = findDraft(id);
   if (!draft || draft.browserPublish?.state !== "uncertain") throw new Error("没有待核对的发布任务");
   if (published) {
-    updateDraftRecord(id, { status: draft.xScheduledAt ? "platform_scheduled" : "published" });
-    await record(id, draft.xScheduledAt ? "scheduled" : "succeeded", draft.xScheduledAt ? "用户已在 X 确认排程存在。" : "用户已手动确认发布成功。");
+    const native = draft.scheduleMode === "native" || (!draft.scheduleMode && draft.xScheduledAt);
+    updateDraftRecord(id, { status: native ? "platform_scheduled" : "published" });
+    await record(id, native ? "scheduled" : "succeeded", native ? "用户已在平台确认排程存在。" : "用户已手动确认发布成功。");
   } else {
     await record(id, "needs_attention", "用户已确认未发布，现在可以重试。");
   }
@@ -237,7 +253,18 @@ export async function recoverPublishing() {
 }
 
 
+let stopping = false;
+export async function runDueScheduledDrafts() {
+  if (busy || stopping) return;
+  const due = getStore().drafts.filter(draft => draft.status === "local_scheduled" && !draft.browserPublish &&
+    Number.isFinite(Date.parse(draft.publishAt || "")) && Date.parse(draft.publishAt!) <= Date.now()).slice(0,100);
+  if (!due.length) return;
+  try { await publishDrafts(due.map(draft => draft.id), true); }
+  catch (error) { void log({source:"app",level:"error",step:"schedule.failed",message:"本地定时执行失败，请检查任务状态",detail:errorDetail(error)}); }
+}
+
 export async function stopPublisher() {
+  stopping = true;
   await Promise.all([...clients.values()].map(client => client.stop()));
   clients.clear();
 }

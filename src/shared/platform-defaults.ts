@@ -3,6 +3,7 @@ import type { Platform, PlatformDefaults, PlatformDefaultsMap } from "./types";
 export function defaultPlatformSettings(): PlatformDefaultsMap {
   const common = {hashtags: [], boardName: "", title: "", scheduleDelayMinutes: 0};
   return {
+    facebook: {...common, hashtags: [], imagesPerDraft: 10},
     bluesky: {...common, hashtags: [], imagesPerDraft: 4},
     instagram: {...common, hashtags: [], imagesPerDraft: 10},
     x: {...common, hashtags: [], imagesPerDraft: 4},
@@ -12,7 +13,7 @@ export function defaultPlatformSettings(): PlatformDefaultsMap {
 }
 
 export function validatePlatformDefaults(platform: Platform, input: PlatformDefaults): PlatformDefaults {
-  if (!["instagram", "x", "pinterest", "tiktok", "bluesky"].includes(platform)) throw new Error("无效的平台");
+  if (!["instagram", "x", "pinterest", "tiktok", "bluesky", "facebook"].includes(platform)) throw new Error("无效的平台");
   if (!input || typeof input !== "object") throw new Error("无效的平台配置");
   if (input?.tiktokPrivacy !== undefined && !["public", "self_only"].includes(input.tiktokPrivacy)) throw new Error("无效的 TikTok 隐私选项");
   const max = defaultPlatformSettings()[platform].imagesPerDraft;
@@ -26,7 +27,7 @@ export function validatePlatformDefaults(platform: Platform, input: PlatformDefa
     hashtags: [...new Set(input.hashtags.map(tag => tag.trim()).filter(Boolean))],
     boardName: platform === "pinterest" ? input.boardName.trim() : "",
     title: platform === "pinterest" ? input.title : "",
-    scheduleDelayMinutes: platform === "x" ? input.scheduleDelayMinutes : 0
+    scheduleDelayMinutes: input.scheduleDelayMinutes
   };
 }
 

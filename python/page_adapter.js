@@ -2,7 +2,9 @@
 (() => {
   if (globalThis.fanzyPublisher) return;
   let current = null;
-  const hosts = {bluesky:'bsky.app',x:'x.com',instagram:'www.instagram.com',pinterest:'www.pinterest.com',tiktok:'www.tiktok.com'};
+  const facebookPostLabel = /^(Post|Publish|发布|发帖|發帖|發布|發佈|發表|發佈貼文|发布帖子)$/i;
+  const facebookNextLabel = /^(Next|下一步)$/i;
+  const hosts = {facebook:'www.facebook.com',bluesky:'bsky.app',x:'x.com',instagram:'www.instagram.com',pinterest:'www.pinterest.com',tiktok:'www.tiktok.com'};
   async function trace(step,message,level='info',detail) {
     try { await globalThis.fanzyTrace({step,message,level,detail}); } catch {}
   }
@@ -18,6 +20,10 @@
     if(restricted) throw Error('X 账号已被暂停或设为只读，无法发帖。请先在 X 处理账号限制，再重新发布');
   }
   function controlsRoot() {
+    if(current?.platform==='facebook' && current.composer) {
+      if(!current.composer.isConnected) throw Error('Facebook 发帖窗口已关闭，请检查页面后重试');
+      return current.composer;
+    }
     if(current?.platform!=='instagram'||!current.composer) return document;
     if(!current.composer.isConnected) throw Error('Instagram 发帖窗口已关闭或重新加载');
     return current.composer;
@@ -132,6 +138,13 @@
   }
   function caption(job,withTitle=true) { return [withTitle?job.title:'',job.caption,job.hashtags.join(' ')].filter(Boolean).join('\n\n'); }
   function success(platform,root=document) {
+    if(platform==='facebook') {
+      const selector='[role="status"],[role="alert"]';
+      return [...(root.matches?.(selector)?[root]:[]),...all(selector,root)].some(node=>visible(node)&&/^(Your post has been shared|Your post was published|Post published|你的帖子已发布|帖子已发布|貼文已發佈|已分享你的貼文)[.!。！]?$/i.test(node.textContent.trim()));
+    }
+    if(current?.scheduleAt && ['instagram','pinterest'].includes(platform)) {
+      return all('[role="status"],[role="alert"],h1,h2,h3,span,p',root).some(node=>visible(node)&&/^(?:(?:Your\s+)?(?:Pin|post|reel)\s+(?:has been\s+)?(?:successfully\s+)?scheduled|(?:你的)?(?:帖子|貼文|Pin\s*图|Pin\s*圖)已(?:排程|安排|定时)|已安排定时发布)[.!。！]?$/i.test(node.textContent.trim()));
+    }
     if(platform==='bluesky') return Boolean(current?.confirmedUrl);
     if(platform==='tiktok') {
       const nodes=[...(root.nodeType===1?[root]:[]),...all('[role="status"],[role="alert"],h1,h2,h3,span,p,div',root)];
@@ -166,6 +179,8 @@
     await trace('images.attached','图片已交给平台上传控件，等待平台处理');
   }
   function finalButton(platform) {
+    if(platform==='facebook') return findButton(facebookPostLabel);
+    if(current?.scheduleAt && ['instagram','pinterest'].includes(platform)) return findButton(/^(Schedule|Schedule Pin|Schedule post|排程|定时发布|安排发布时间|安排發布時間|預約發布)$/i);
     if(platform==='bluesky') return unique(all('[data-testid="composerPublishBtn"]',current.composer).filter(visible),'Bluesky 发布按钮');
     if(platform==='tiktok') return findButton(/^(Post|Publish|发布|發佈)$/i);
     if(platform==='x') {
@@ -215,6 +230,32 @@
     await wait(()=>finalButton('x'),'X 最终排程按钮');
     await trace('schedule.ready','X 排程时间已填写，等待提交许可：'+date.toISOString());
   }
+  async function scheduleNative(iso) {
+    const date=new Date(iso);
+    if(!Number.isFinite(date.getTime()) || date.getTime()<Date.now()+60000) throw Error('定时时间已过期，请重新设置');
+    const root=controlsRoot();
+    const entry=unique(all('button,[role="button"],input[type="checkbox"],[role="switch"],[role="checkbox"],input[type="radio"]',root).filter(node=>visible(node)&&/^(Publish at a later date|Publish later|Schedule for later|Schedule this post|Schedule date|稍后发布|稍後發佈|定时发布|安排发布时间|安排發布時間)$/i.test(name(node).trim())),'原生排程入口');
+    if(!entry) return false;
+    if(entry.disabled||entry.getAttribute('aria-disabled')==='true') return false;
+    if(!entry.checked && entry.getAttribute('aria-checked')!=='true' && entry.getAttribute('aria-expanded')!=='true') entry.click();
+    // Only use unambiguous browser date/time fields. Unknown custom pickers fall
+    // back before submission instead of guessing locale-dependent date strings.
+    await pause(500);
+    const dateInput=unique(all('input[type="date"]',root).filter(visible),'排程日期');
+    const timeInput=unique(all('input[type="time"]',root).filter(visible),'排程时间');
+    const combined=unique(all('input[type="datetime-local"]',root).filter(visible),'排程日期时间');
+    if(!combined&&(!dateInput||!timeInput)) return false;
+    const local=new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
+    const pairs=combined?[[combined,local]]:[[dateInput,local.slice(0,10)],[timeInput,local.slice(11)]];
+    for(const [node,value] of pairs) {if(node.disabled||node.readOnly) return false; await fill(node,value);}
+    const valid=()=>pairs.every(([node,value])=>visible(node)&&node.value===value&&node.checkValidity());
+    if(!valid()) return false;
+    current.scheduleAt=iso;
+    if(!finalButton(current.platform)) {current.scheduleAt=null;return false;}
+    current.checkSchedule=valid;
+    await trace('schedule.ready','原生排程已填写并核对：'+iso+'；浏览器时区：'+Intl.DateTimeFormat().resolvedOptions().timeZone);
+    return true;
+  }
   globalThis.fanzyPublisher=async (phase,job,extra) => {
     if(location.protocol!=='https:'||location.hostname!==hosts[job.platform]) throw Error('当前页面不是指定平台');
     if(phase==='begin') {
@@ -245,7 +286,34 @@
     }
     if(phase==='prepare') {
       if(current.prepared||current.submitted||current.files.length!==job.fileCount) throw Error('任务阶段或图片数量错误');
-      if(job.platform==='bluesky') {
+      if(job.platform==='facebook') {
+        if(job.nativeScheduledAt) throw Error('Facebook 请使用本地定时发布');
+        if(job.altText) throw Error('Facebook 暂不支持自动填写替代文本，请清空替代文本后重试，或手动发布');
+        const composer=()=>unique(all('[role="dialog"]').filter(node=>visible(node)&&all('[contenteditable="true"][role="textbox"]',node).some(visible)),'Facebook 发帖窗口');
+        // Facebook localizes this prompt and may prefix it with the account name.
+        // Keep the whole label anchored so timeline text cannot act as an entry.
+        if(!composer()) await click(/^(What['’]s on your mind(?:,\s*[^\n]+)?\??|(?:[^\n，,]+[，,]\s*)?(?:你在想什么|在想些什麼|在想什么)[？?]?|(?:[^\n，,]+[，,]\s*)?(?:分享你的新鲜事吧|分享你的新鮮事吧)[！!。.]?)$/i);
+        current.composer=await wait(composer,'Facebook 发帖窗口');
+        const editor=await wait(()=>unique(all('[contenteditable="true"][role="textbox"]',current.composer).filter(visible),'Facebook 文案框'),'Facebook 文案框');
+        editor.setAttribute('data-fanzy-facebook-editor','true');
+        await globalThis.fanzyFacebookInput();
+        await wait(()=>editor.innerText.replace(/\r\n/g,'\n').trim()===caption(job).trim(),'Facebook 文案确认');
+        const fileSelector='input[type="file"][accept*="image"]';
+        if(!all(fileSelector,current.composer).length) await click(/^(Photo\/video|Photo\/Video|照片\/视频|照片／视频|相片\/影片|相片／影片)$/i);
+        await upload(fileSelector,current.composer);
+        await wait(()=>{
+          const previews=all('img',current.composer).filter(img=>visible(img)&&/^(blob:|data:)/.test(img.src)&&img.complete&&img.naturalWidth>0);
+          const removing=all('button,[role="button"]',current.composer).filter(node=>visible(node)&&/^(Remove photo|Remove image|移除照片|删除照片|移除相片)/i.test(name(node)));
+          return (previews.length===job.fileCount||removing.length===job.fileCount)&&!all('[role="progressbar"],[aria-busy="true"]',current.composer).some(visible);
+        },'Facebook 图片上传完成',60000);
+        // Upload completion can precede the footer rendering. Wait for either
+        // known step; an absent Post button alone is not evidence of a Next step.
+        const step=await wait(()=>finalButton('facebook')?'post':findButton(facebookNextLabel)?'next':null,'Facebook 发帖或下一步按钮');
+        if(step==='next') {
+          await click(facebookNextLabel);
+          current.composer=await wait(()=>unique(all('[role="dialog"]').filter(node=>visible(node)&&all('button,[role="button"]',node).some(button=>visible(button)&&facebookPostLabel.test(name(button).trim()))),'Facebook 发布设置窗口'),'Facebook 发布设置窗口');
+        }
+      } else if(job.platform==='bluesky') {
         const text=caption(job);
         if([...new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(text)].length>300) throw Error('Bluesky 正文与话题合计最多 300 字符，请缩短文案');
         current.composer=await wait(()=>unique(all('[data-testid="composePostView"]').filter(visible),'Bluesky 发帖窗口'),'Bluesky 发帖窗口');
@@ -270,7 +338,7 @@
             descriptions[0].click(); await field(/(Description|Alt text|描述|替代文本)/i,job.altText); await click(/^(Save|Done|保存|完成)$/i);
           }
         }
-        if(job.xScheduledAt) await scheduleX(job.xScheduledAt);
+        if(job.nativeScheduledAt || job.xScheduledAt) await scheduleX(job.nativeScheduledAt || job.xScheduledAt);
       } else if(job.platform==='instagram') {
         if(instagramOpenState()!=='open') throw Error('Instagram 上传弹窗尚未确认打开，禁止上传');
         await upload('input[type="file"]',current.composer);
@@ -420,6 +488,9 @@
           return null;
         },'目标图板');board.click();
       }
+      if(job.nativeScheduledAt && ['instagram','pinterest'].includes(job.platform)) {
+        if(!await scheduleNative(job.nativeScheduledAt)) return {state:'local_scheduled',message:'当前发布页面没有可用的原生排程控件，已转为本地定时；尚未提交帖子'};
+      }
       current.control=await wait(()=>finalButton(job.platform),'发布按钮');
       await wait(()=>!current.control.disabled&&current.control.getAttribute('aria-disabled')!=='true','发布按钮可用');
       if(success(job.platform)) throw Error('发现旧的发布成功提示，无法确认本次结果');
@@ -427,6 +498,7 @@
     }
     if(phase==='submit') {
       checkAccount();
+      if(current.checkSchedule&&!current.checkSchedule()) throw Error('排程时间在提交前发生变化，已停止发布');
       if(current.checkPrivacy&&!current.checkPrivacy()) throw Error('TikTok 隐私设置在提交前发生变化，已停止发布');
       if(current.scheduleAt && Date.parse(current.scheduleAt)<=Date.now()+30000) throw Error('排程时间即将到达，已停止提交，请重新设置');
       if(!current.prepared||current.submitted) throw Error('禁止重复提交');
@@ -442,15 +514,15 @@
           if(nodes.some(node=>{const root=node.nodeType===Node.ELEMENT_NODE?node:node.parentElement;return root&&success(job.platform,root);})) {observed=true;break;}
         }
       });
-      if(['pinterest','tiktok'].includes(job.platform)) observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['hidden','style','class','aria-hidden']});
+      if(['facebook','pinterest','tiktok'].includes(job.platform)) observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['hidden','style','class','aria-hidden']});
       try {
         current.submitted=true;control.click();capture();
-        await trace('control.wait',current.scheduleAt?'等待：X 排程成功确认':'等待：平台发布成功确认');
+        await trace('control.wait',current.scheduleAt?'等待：平台排程成功确认':'等待：平台发布成功确认');
         const deadline=Date.now()+45000;
         while(Date.now()<deadline) {
           if(observed||current.confirmedUrl||current.confirmedTikTok||success(job.platform)) {
-            await trace('submit.success',current.confirmedUrl?'平台已返回本次发布的帖子链接':current.scheduleAt?'X 已确认排程：'+current.scheduleAt:'平台发布成功确认已出现');
-            return {state:'succeeded',url:current.confirmedUrl||location.href};
+            await trace('submit.success',current.confirmedUrl?'平台已返回本次发布的帖子链接':current.scheduleAt?'平台已确认排程：'+current.scheduleAt:'平台发布成功确认已出现');
+            return {state:'succeeded',url:current.confirmedUrl||(job.platform==='facebook'?null:location.href)};
           }
           await pause(250);
         }

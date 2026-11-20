@@ -9,7 +9,7 @@ import ts from 'typescript';
 
 const source=await fs.readFile('src/main/browser-publisher.ts','utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText;
-let drafts=[], spawned=[], active=new Set(), maximum=0, starts=[], finished=[], failPlatform, crashPlatform, lockedDuringCompletion=false;
+let drafts=[], spawned=[], active=new Set(), maximum=0, starts=[], finished=[], failPlatform, crashPlatform, fallbackPlatform, lockedDuringCompletion=false;
 const events=[];
 const store={
   findDraft:id=>drafts.find(d=>d.id===id),
@@ -37,6 +37,8 @@ function spawn() {
       job=message;
       assert.ok(!active.has(job.platform),'same platform must never overlap');
       active.add(job.platform);maximum=Math.max(maximum,active.size);starts.push(job.id);
+      if(job.platform===fallbackPlatform && job.nativeScheduledAt) {active.delete(job.platform);emit({type:'result',state:'local_scheduled'});done();return;}
+      if(store.findDraft(job.id).scheduleMode==='local') {assert.equal(job.nativeScheduledAt,null);assert.equal(job.xScheduledAt,null);}
       if(job.platform===crashPlatform) {active.delete(job.platform);emit({type:'fatal',message:'fixture process failure'});done();return;}
       emit({type:'submitting'});
     } else emit({type:'result',state:'opened'});
@@ -83,6 +85,41 @@ await api.publishDrafts(drafts.map(d=>d.id));
 assert.equal(store.findDraft('xc1').browserPublish.state,'needs_attention');
 assert.ok(!starts.includes('xc2'));
 assert.equal(store.findDraft('tc2').status,'published');
+crashPlatform=undefined; starts=[];
+const future=new Date(Date.now()+3600000).toISOString();
+drafts=[{...make('facebook-local','facebook'),publishAt:future}];
+await api.publishDrafts(['facebook-local']);
+assert.equal(store.findDraft('facebook-local').status,'local_scheduled');
+assert.ok(!starts.includes('facebook-local'));
+store.findDraft('facebook-local').publishAt=new Date(Date.now()-1000).toISOString();
+await api.runDueScheduledDrafts();
+assert.equal(store.findDraft('facebook-local').status,'published');
+assert.equal(starts.filter(id=>id==='facebook-local').length,1);
+drafts=[{...make('local','bluesky'),publishAt:future},{...make('native','x'),publishAt:future}];
+await api.publishDrafts(['local','native']);
+assert.equal(store.findDraft('local').status,'local_scheduled');
+assert.ok(!starts.includes('local'),'future local jobs must not open a browser');
+assert.equal(store.findDraft('native').status,'platform_scheduled');
+await assert.rejects(api.publishDrafts(['local']),/本地队列/);
+await api.runDueScheduledDrafts();
+assert.ok(!starts.includes('local'),'future jobs are not due');
+store.findDraft('local').publishAt=new Date(Date.now()-1000).toISOString();
+await Promise.all([api.runDueScheduledDrafts(),api.runDueScheduledDrafts()]);
+await api.runDueScheduledDrafts();
+assert.equal(starts.filter(id=>id==='local').length,1,'overlapping ticks publish exactly once');
+assert.equal(store.findDraft('local').status,'published');
+fallbackPlatform='pinterest'; starts=[];
+drafts=[{...make('fallback','pinterest'),publishAt:future}];
+await api.publishDrafts(['fallback']);
+assert.equal(drafts[0].status,'local_scheduled');
+assert.equal(drafts[0].scheduleMode,'local');
+assert.equal(drafts[0].browserPublish,undefined,'fallback occurs before checkpoint');
+drafts[0].publishAt=new Date(Date.now()-1000).toISOString();
+failPlatform='pinterest';
+await api.runDueScheduledDrafts();
+assert.equal(drafts[0].browserPublish.state,'uncertain');
+await api.runDueScheduledDrafts();
+assert.equal(starts.length,2,'uncertain local publication must never auto-retry');
 await api.stopPublisher();
 assert.ok(spawned.every(child=>child.exitCode!==null));
 console.log('PASS: cross-platform concurrency, per-platform ordering, checkpoint isolation, batch locks, failure isolation, login reuse and shutdown');

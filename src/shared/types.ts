@@ -1,4 +1,4 @@
-export type Platform = "instagram" | "x" | "pinterest" | "tiktok" | "bluesky";
+export type Platform = "instagram" | "x" | "pinterest" | "tiktok" | "bluesky" | "facebook";
 export interface PlatformDefaults {
   imagesPerDraft: number;
   tiktokPrivacy?: "public" | "self_only";
@@ -10,9 +10,10 @@ export interface PlatformDefaults {
 export type PlatformDefaultsMap = Record<Platform, PlatformDefaults>;
 export interface CopyOptions {
   sharedCaption: string;
-  platforms: Partial<Record<Platform, { mode: "shared" | "independent"; caption: string }>>;
+  sharedCaptionHtml?: string;
+  platforms: Partial<Record<Platform, { mode: "shared" | "independent"; caption: string; captionHtml?: string }>>;
 }
-export type DraftPatch = Partial<Pick<Draft, "title" | "caption" | "altText" | "hashtags" | "boardName" | "xScheduledAt" | "captionMode" | "tiktokPrivacy">>;
+export type DraftPatch = Partial<Pick<Draft, "title" | "caption" | "captionHtml" | "altText" | "hashtags" | "boardName" | "xScheduledAt" | "publishAt" | "captionMode" | "tiktokPrivacy">>;
 export interface BrowserSettings { showBrowser: boolean; channel: "msedge" | "chrome" | "chromium"; }
 export interface RunLog {
   id: string;
@@ -28,7 +29,7 @@ export interface RunLog {
   detail?: string;
 }
 export interface LogSnapshot { entries: RunLog[]; directory: string; storageError: string | null; }
-export type DraftStatus = "draft" | "ready" | "scheduled" | "prepared" | "published" | "reminder_due" | "platform_scheduled";
+export type DraftStatus = "draft" | "ready" | "scheduled" | "local_scheduled" | "prepared" | "published" | "reminder_due" | "platform_scheduled";
 
 export interface ImageAsset {
   id: string;
@@ -48,6 +49,9 @@ export interface Draft {
   imageIds: string[];
   title: string;
   caption: string;
+  captionHtml?: string;
+  sharedCaptionHtml?: string;
+  independentCaptionHtml?: string;
   copyGroupId?: string;
   captionMode?: "shared" | "independent";
   sharedCaption?: string;
@@ -63,6 +67,8 @@ export interface Draft {
   boardName?: string;
   tiktokPrivacy?: "public" | "self_only";
   xScheduledAt?: string | null;
+  publishAt?: string | null;
+  scheduleMode?: "native" | "local" | null;
   browserPublish?: { state: "running" | "needs_attention" | "uncertain" | "succeeded" | "scheduled"; message: string; submittedAt?: string };
 }
 

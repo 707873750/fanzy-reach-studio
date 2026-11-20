@@ -91,7 +91,7 @@ export function updateDraftRecord(id: string, patch: Partial<StoredDraft>) {
 
 export function platformBatchSize(platform: Platform) {
   if (platform === "tiktok") return 35;
-  if (platform === "instagram") return 10;
+  if (platform === "instagram" || platform === "facebook") return 10;
   if (platform === "x" || platform === "bluesky") return 4;
   return 1;
 }

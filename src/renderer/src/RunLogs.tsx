@@ -5,7 +5,7 @@ import type { RunLog } from "../../shared/types";
 const logTime = new Intl.DateTimeFormat("zh-CN", {dateStyle:"short", timeStyle:"medium", hour12:false});
 const LogRow = memo(function LogRow({entry}: {entry: RunLog}) {
   return <article className={`log-row log-${entry.level}`}>
-    <div className="log-meta"><time dateTime={entry.time}>{logTime.format(new Date(entry.time))}</time><strong>{{info:"信息",warn:"警告",error:"错误"}[entry.level]}</strong><span>{{app:"程序",python:"Python 后端",extension:"浏览器扩展",page:"平台页面"}[entry.source]}</span>{entry.platform && <span>{{instagram:"Instagram",x:"X",pinterest:"Pinterest",tiktok:"TikTok",bluesky:"Bluesky"}[entry.platform]}</span>}<code>{entry.step}</code></div>
+    <div className="log-meta"><time dateTime={entry.time}>{logTime.format(new Date(entry.time))}</time><strong>{{info:"信息",warn:"警告",error:"错误"}[entry.level]}</strong><span>{{app:"程序",python:"Python 后端",extension:"浏览器扩展",page:"平台页面"}[entry.source]}</span>{entry.platform && <span>{{instagram:"Instagram",x:"X",pinterest:"Pinterest",tiktok:"TikTok",bluesky:"Bluesky",facebook:"Facebook"}[entry.platform]}</span>}<code>{entry.step}</code></div>
     <div className="log-message">{entry.message}</div>
     <details><summary>详情{entry.draftId ? ` · 草稿 ${entry.draftId.slice(0, 8)}` : ""}</summary><pre>{[entry.draftId && `草稿：${entry.draftId}`, entry.jobId && `执行：${entry.jobId}`, `会话：${entry.sessionId}`, entry.detail].filter(Boolean).join("\n")}</pre></details>
   </article>;
@@ -86,7 +86,7 @@ export default function RunLogs({ draftId = "" }: { draftId?: string }) {
       {storageError && <div className="notice log-storage-error" role="alert">日志文件保存失败，当前记录仅在内存中：{storageError}</div>}
       <div className="log-filters">
         <div className="field"><label htmlFor="log-level">级别</label><select id="log-level" value={level} onChange={e => setLevel(e.target.value)}><option value="all">全部级别</option><option value="info">信息</option><option value="warn">警告</option><option value="error">错误</option></select></div>
-        <div className="field"><label htmlFor="log-platform">平台</label><select id="log-platform" value={platform} onChange={e => setPlatform(e.target.value)}><option value="all">全部平台</option><option value="x">X</option><option value="instagram">Instagram</option><option value="pinterest">Pinterest</option><option value="tiktok">TikTok</option><option value="bluesky">Bluesky</option></select></div>
+        <div className="field"><label htmlFor="log-platform">平台</label><select id="log-platform" value={platform} onChange={e => setPlatform(e.target.value)}><option value="all">全部平台</option><option value="x">X</option><option value="instagram">Instagram</option><option value="pinterest">Pinterest</option><option value="tiktok">TikTok</option><option value="facebook">Facebook</option><option value="bluesky">Bluesky</option></select></div>
         <div className="field log-search"><label htmlFor="log-search">搜索步骤、错误或任务 ID</label><input id="log-search" value={search} onChange={e => setSearch(e.target.value)} placeholder="例如 images.upload、任务 ID、未连接"/></div>
       </div>
       <p className="muted">当前匹配 {filtered.length} 条 · 时间使用本机时区 · 点击记录下方的详情查看错误堆栈和任务标识</p>

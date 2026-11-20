@@ -3,7 +3,7 @@ import {
   Aperture, ArrowUpRight, CalendarClock, Check, CheckCircle2,
   ChevronDown, CircleHelp, Copy, FileImage, FolderOpen, ImagePlus,
   Instagram, LayoutDashboard, Link2, ListChecks, Loader2, Plus,
-  Search, Send, Settings, Sparkles, Trash2, Upload, X, Twitter, Music2
+  Search, Send, Settings, Sparkles, Trash2, Upload, X, Twitter, Music2, Facebook
 } from "lucide-react";
 import type { BrowserSettings, Draft, ImageAsset, Platform, SettingsView } from "../../shared/types";
 import type { CopyOptions } from "../../shared/types";
@@ -13,10 +13,12 @@ import { canDeleteDraft, isPublishRecord } from "../../shared/draft-lifecycle";
 import RunLogs from "./RunLogs";
 import PlatformSettings from "./PlatformSettings";
 import PublishHistory from "./PublishHistory";
+import CaptionEditor from "./CaptionEditor";
 
 type Page = "library" | "queue" | "history" | "settings" | "logs";
-const STATUS_LABEL: Record<string, string> = {draft:"草稿",ready:"待发布",scheduled:"已定时",prepared:"素材已准备",published:"已发布",reminder_due:"提醒已到期",platform_scheduled:"平台已排程",running:"正在发布",needs_attention:"需要处理",uncertain:"已提交，结果待确认",succeeded:"发布成功"};
+const STATUS_LABEL: Record<string, string> = {draft:"草稿",ready:"待发布",scheduled:"已设提醒",local_scheduled:"本地待发布",prepared:"素材已准备",published:"已发布",reminder_due:"提醒已到期",platform_scheduled:"平台已排程",running:"正在发布",needs_attention:"需要处理",uncertain:"已提交，结果待确认",succeeded:"发布成功"};
 const PLATFORM_META: Record<Platform, { label: string; url: string; icon: typeof Instagram; color: string }> = {
+  facebook: { label: "Facebook", url: "https://www.facebook.com/", icon: Facebook, color: "#1877F2" },
   bluesky: { label: "Bluesky", url: "https://bsky.app/", icon: Twitter, color: "#0085FF" },
   instagram: { label: "Instagram", url: "https://www.instagram.com/", icon: Instagram, color: "#E879A6" },
   x: { label: "X", url: "https://x.com/compose/post", icon: Twitter, color: "#D8DEE9" },
@@ -32,12 +34,13 @@ function App() {
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [pendingImageDeleteIds, setPendingImageDeleteIds] = useState<string[] | null>(null);
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
-  const [platforms, setPlatforms] = useState<Platform[]>(["instagram", "x", "pinterest", "tiktok", "bluesky"]);
-  const [copyOptions, setCopyOptions] = useState<CopyOptions>({sharedCaption:"", platforms:{bluesky:{mode:"shared",caption:""},instagram:{mode:"shared",caption:""},x:{mode:"shared",caption:""},pinterest:{mode:"shared",caption:""},tiktok:{mode:"shared",caption:""}}});
+  const [platforms, setPlatforms] = useState<Platform[]>(["instagram", "x", "pinterest", "tiktok", "bluesky", "facebook"]);
+  const [copyOptions, setCopyOptions] = useState<CopyOptions>({sharedCaption:"", platforms:{facebook:{mode:"shared",caption:""},bluesky:{mode:"shared",caption:""},instagram:{mode:"shared",caption:""},x:{mode:"shared",caption:""},pinterest:{mode:"shared",caption:""},tiktok:{mode:"shared",caption:""}}});
   const [hashtags, setHashtags] = useState("");
   const [settings, setSettings] = useState<SettingsView>({ hasDeepSeekKey: false, model: "deepseek-flash" });
   const [apiKey, setApiKey] = useState("");
   const [caption, setCaption] = useState("");
+  const [captionHtml, setCaptionHtml] = useState<string | undefined>();
   const [title, setTitle] = useState("");
   const [altText, setAltText] = useState("");
   const [publishedUrl, setPublishedUrl] = useState("");
@@ -55,7 +58,7 @@ function App() {
   const [tiktokPrivacy, setTikTokPrivacy] = useState<"public" | "self_only">("self_only");
   const [boardName, setBoardName] = useState("");
   const [browserSettings, setBrowserSettings] = useState<BrowserSettings>({showBrowser:false,channel:"chrome"});
-  const canPublish = canEditCopy;
+  const canPublish = (draft: Draft) => canEditCopy(draft) && draft.status !== "local_scheduled";
   const publishSelected = async () => {
     if (publishingRef.current || busy || !canSubmitSelection) return;
     const ids = selectedDrafts.map(draft => draft.id);
@@ -64,10 +67,10 @@ function App() {
     setNotice("");
     try {
     if (selectedDraft && ids.includes(selectedDraft.id)) {
-      await window.reach.updateDraft(selectedDraft.id, { caption, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, xScheduledAt: selectedDraft.platform === "x" && xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
+      await window.reach.updateDraft(selectedDraft.id, { caption, captionHtml, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, publishAt: xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
     }
     const result = await window.reach.publishDrafts(ids);
-    setNotice(`已发布 ${result.filter((d) => d.status === "published").length}/${result.length} 条；X 已排程 ${result.filter((d) => d.browserPublish?.state === "scheduled").length} 条。重试前请核对各任务结果。`);
+    setNotice(`已发布 ${result.filter((d) => d.status === "published").length}/${result.length} 条；本地待发布 ${result.filter(d => d.status === "local_scheduled").length} 条；平台已排程 ${result.filter((d) => d.browserPublish?.state === "scheduled").length} 条。重试前请核对各任务结果。`);
     setCheckedDrafts(old => old.filter(id => !ids.includes(id)));
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "发布操作失败，请查看运行日志");
@@ -82,8 +85,8 @@ function App() {
   const queueDrafts = useMemo(() => drafts.filter(draft => !isPublishRecord(draft)), [drafts]);
   const publishRecords = useMemo(() => drafts.filter(isPublishRecord).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), [drafts]);
   const selectedDraft = queueDrafts.find((draft) => draft.id === selectedDraftId) || null;
-  const lockedGroups = new Set(drafts.filter(d => publishingIds.includes(d.id)).map(d => d.copyGroupId).filter(Boolean));
-  const draftLocked = (draft: Draft) => publishingIds.includes(draft.id) || Boolean(draft.copyGroupId && lockedGroups.has(draft.copyGroupId));
+  const lockedGroups = new Set(drafts.filter(d => publishingIds.includes(d.id) || d.browserPublish?.state === "running").map(d => d.copyGroupId).filter(Boolean));
+  const draftLocked = (draft: Draft) => publishingIds.includes(draft.id) || draft.browserPublish?.state === "running" || Boolean(draft.copyGroupId && lockedGroups.has(draft.copyGroupId));
   const detailBusy = busy || Boolean(selectedDraft && draftLocked(selectedDraft));
   const browserBusy = busy || publishing;
   const selectedDrafts = queueDrafts.filter(draft => checkedDrafts.includes(draft.id));
@@ -146,18 +149,20 @@ function App() {
   useEffect(() => {
     if (!selectedDraft) {
       setCaption("");
+      setCaptionHtml(undefined);
       setTitle("");
       setAltText("");
       setPublishedUrl("");
       return;
     }
     setCaption(selectedDraft.caption);
+    setCaptionHtml(selectedDraft.captionHtml);
     setHashtags(selectedDraft.hashtags.join(" "));
     setTitle(selectedDraft.title);
     setAltText(selectedDraft.altText);
     setBoardName(selectedDraft.boardName || "");
     setTikTokPrivacy(selectedDraft.tiktokPrivacy || "self_only");
-    const time = selectedDraft.xScheduledAt ? new Date(selectedDraft.xScheduledAt) : null;
+    const time = (selectedDraft.publishAt || selectedDraft.xScheduledAt) ? new Date((selectedDraft.publishAt || selectedDraft.xScheduledAt)!) : null;
     setXScheduleAt(time ? new Date(time.getTime() - time.getTimezoneOffset()*60000).toISOString().slice(0,16) : "");
     setPublishedUrl(selectedDraft.publishedUrl || "");
   }, [selectedDraftId, selectedDraft?.updatedAt, selectedDraft?.captionMode]);
@@ -219,7 +224,7 @@ function App() {
   const saveDraft = async () => {
     if (!selectedDraft) return;
     await runBusy("正在保存草稿…", async () => {
-      await window.reach.updateDraft(selectedDraft.id, { caption, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, xScheduledAt: selectedDraft.platform === "x" && xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
+      await window.reach.updateDraft(selectedDraft.id, { caption, captionHtml, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, publishAt: xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
     });
   };
 
@@ -262,7 +267,7 @@ function App() {
   const prepare = () => {
     if (!selectedDraft) return;
     void runBusy("正在准备发布素材…", async () => {
-      await window.reach.updateDraft(selectedDraft.id, { caption, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, xScheduledAt: selectedDraft.platform === "x" && xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
+      await window.reach.updateDraft(selectedDraft.id, { caption, captionHtml, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, publishAt: xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
       await window.reach.prepareDraft(selectedDraft.id);
       setNotice("已打开素材文件夹并复制文案，请在平台官网完成发布。");
     });
@@ -314,7 +319,7 @@ function App() {
   const switchCaptionMode = (mode: "shared" | "independent") => {
     if (!selectedDraft) return;
     void runBusy("正在切换文案模式…", async () => {
-      await window.reach.updateDraft(selectedDraft.id, {caption, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, xScheduledAt: selectedDraft.platform === "x" && xScheduleAt ? new Date(xScheduleAt).toISOString() : null});
+      await window.reach.updateDraft(selectedDraft.id, {caption, captionHtml, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, publishAt: xScheduleAt ? new Date(xScheduleAt).toISOString() : null});
       await window.reach.updateDraft(selectedDraft.id, {captionMode: mode});
     });
   };
@@ -417,7 +422,7 @@ function App() {
               <section className="panel create-panel">
                 <div className="panel-heading"><div><h2>创建发布草稿</h2><p>选择发布平台，图片将按各平台的默认数量分组，并带入已保存的图板、标签和定时偏好。</p></div><button className="text-button" onClick={()=>setPage("settings")}>配置各平台默认选项</button></div>
                 <div className="platform-options">
-                  {(["instagram", "x", "pinterest", "tiktok", "bluesky"] as Platform[]).map((platform) => {
+                  {(["instagram", "x", "pinterest", "tiktok", "bluesky", "facebook"] as Platform[]).map((platform) => {
                     const meta = PLATFORM_META[platform];
                     const Icon = meta.icon;
                     return <button key={platform} className={`platform-option ${platforms.includes(platform) ? "chosen" : ""}`} onClick={() => togglePlatform(platform)}>
@@ -426,14 +431,14 @@ function App() {
                   })}
                 </div>
                 <div className="copy-options">
-                  <div className="field"><label htmlFor="shared-caption">统一文案</label><textarea id="shared-caption" rows={4} maxLength={5000} disabled={busy} value={copyOptions.sharedCaption} onChange={e=>setCopyOptions(old=>({...old,sharedCaption:e.target.value}))} placeholder="填写共用文案；下方可为任意平台单独编写"/></div>
+                  <div className="field"><label htmlFor="shared-caption">统一文案</label><CaptionEditor id="shared-caption" rows={4} maxLength={5000} disabled={busy} value={copyOptions.sharedCaption} html={copyOptions.sharedCaptionHtml} onChange={(value,html)=>setCopyOptions(old=>({...old,sharedCaption:value,sharedCaptionHtml:html}))} placeholder="填写共用文案；下方可为任意平台单独编写"/></div>
                   <p className="muted">共用文案会关联本次创建的草稿。平台独立文案会在切换时保留；素材按各平台批量大小拆分。</p>
                   {platforms.map(platform=><div className="field" key={platform}>
                     <label htmlFor={`copy-mode-${platform}`}>{PLATFORM_META[platform].label} 文案方式</label>
-                    <select id={`copy-mode-${platform}`} disabled={busy} value={copyOptions.platforms[platform]?.mode || "shared"} onChange={e=>setCopyOptions(old=>({...old,platforms:{...old.platforms,[platform]:{caption:old.platforms[platform]?.caption || "",mode:e.target.value as "shared" | "independent"}}}))}>
+                    <select id={`copy-mode-${platform}`} disabled={busy} value={copyOptions.platforms[platform]?.mode || "shared"} onChange={e=>setCopyOptions(old=>({...old,platforms:{...old.platforms,[platform]:{caption:old.platforms[platform]?.caption || "",captionHtml:old.platforms[platform]?.captionHtml,mode:e.target.value as "shared" | "independent"}}}))}>
                       <option value="shared">使用统一文案</option><option value="independent">使用独立文案</option>
                     </select>
-                    {copyOptions.platforms[platform]?.mode === "independent" && <><textarea aria-label={`${PLATFORM_META[platform].label} 独立文案`} rows={3} maxLength={5000} disabled={busy} value={copyOptions.platforms[platform]?.caption || ""} onChange={e=>setCopyOptions(old=>({...old,platforms:{...old.platforms,[platform]:{mode:"independent",caption:e.target.value}}}))}/><button className="text-button" disabled={busy} onClick={()=>setCopyOptions(old=>({...old,platforms:{...old.platforms,[platform]:{mode:"independent",caption:old.sharedCaption}}}))}>复制统一文案到此平台</button></>}
+                    {copyOptions.platforms[platform]?.mode === "independent" && <><CaptionEditor aria-label={`${PLATFORM_META[platform].label} 独立文案`} rows={3} maxLength={5000} disabled={busy} value={copyOptions.platforms[platform]?.caption || ""} html={copyOptions.platforms[platform]?.captionHtml} onChange={(value,html)=>setCopyOptions(old=>({...old,platforms:{...old.platforms,[platform]:{mode:"independent",caption:value,captionHtml:html}}}))}/><button className="text-button" disabled={busy} onClick={()=>setCopyOptions(old=>({...old,platforms:{...old.platforms,[platform]:{mode:"independent",caption:old.sharedCaption,captionHtml:old.sharedCaptionHtml}}}))}>复制统一文案到此平台</button></>}
                   </div>)}
                 </div>
                 <div className="create-footer">
@@ -452,7 +457,7 @@ function App() {
               </section>
               <section className="panel">
                 <h2>多平台自动发布</h2>
-                <p className="muted">提交选中草稿：已设置时间的 X 草稿提交到 X 排程，其余草稿立即发布。登录检查或页面变化会暂停该平台；结果不确定时请先核对再重试。</p>
+                <p className="muted">提交选中草稿：定时任务原生优先，不可用时加入本地队列；未设置时间的立即发布。登录检查或页面变化会暂停该平台；结果不确定时请先核对再重试。</p>
                 <div className="heading-actions">
                   <button className="button secondary" disabled={busy} onClick={() => setCheckedDrafts(queueDrafts.filter(d => canPublish(d) && !draftLocked(d)).slice(0, 100).map((d) => d.id))}>选择可发布草稿（最多 100 条）</button>
                   <button className="button secondary" disabled={busy} onClick={() => setCheckedDrafts([])}>清空选择</button>
@@ -496,17 +501,18 @@ function App() {
                       </div>
                       {selectedDraft.browserPublish && <div className="published-box"><strong>{STATUS_LABEL[selectedDraft.browserPublish.state]}</strong><button className="text-button" onClick={() => { setLogDraftId(selectedDraft.id); setPage("logs"); }}>查看该任务日志</button><p className="muted">{selectedDraft.browserPublish.message}</p>
                         {selectedDraft.browserPublish.state === "uncertain" && <div className="detail-actions">
-                          <button className="button success" disabled={detailBusy} onClick={() => void runBusy("正在保存核对结果…", () => window.reach.resolvePublish(selectedDraft.id, true))}>{selectedDraft.xScheduledAt ? "已在 X 确认排程存在" : "已确认发布成功"}</button>
-                          <button className="button secondary" disabled={detailBusy} onClick={() => void runBusy("正在保存核对结果…", () => window.reach.resolvePublish(selectedDraft.id, false))}>{selectedDraft.xScheduledAt ? "已确认 X 中无此排程 — 允许重试" : "已确认未发布，允许重试"}</button>
+                          <button className="button success" disabled={detailBusy} onClick={() => void runBusy("正在保存核对结果…", () => window.reach.resolvePublish(selectedDraft.id, true))}>{selectedDraft.scheduleMode === "native" ? "已在平台确认排程存在" : "已确认发布成功"}</button>
+                          <button className="button secondary" disabled={detailBusy} onClick={() => void runBusy("正在保存核对结果…", () => window.reach.resolvePublish(selectedDraft.id, false))}>{selectedDraft.scheduleMode === "native" ? "已确认平台中无此排程，允许重试" : "已确认未发布，允许重试"}</button>
                         </div>}
                       </div>}
                       {selectedDraft.platform === "tiktok" && <div className="field"><label htmlFor="tiktok-privacy">谁可以看</label><select id="tiktok-privacy" disabled={detailBusy || !canEditCopy(selectedDraft)} value={tiktokPrivacy} onChange={e=>setTikTokPrivacy(e.target.value as "public" | "self_only")}><option value="self_only">仅自己</option><option value="public">所有人</option></select></div>}
                       {selectedDraft.platform === "pinterest" && <div className="field"><label>Pinterest 图板名称（必填，需完全匹配）</label><input disabled={detailBusy} value={boardName} onChange={(e) => setBoardName(e.target.value)}/></div>}
-                      {selectedDraft.platform === "x" && <div className="field">
-                        <label htmlFor="x-schedule">X 定时发布时间（{Intl.DateTimeFormat().resolvedOptions().timeZone}）</label>
-                        <input id="x-schedule" type="datetime-local" disabled={detailBusy || !canPublish(selectedDraft)} value={xScheduleAt} onChange={e=>setXScheduleAt(e.target.value)}/>
-                        <p className="muted">留空立即发布。选择至少 5 分钟后的时间，保存并提交草稿后，由 X 原生排程；收到排程确认后无需保持本程序运行。修改或取消已提交排程请前往 X。</p>
+                      {<div className="field">
+                        <label htmlFor="x-schedule">定时发布时间（{Intl.DateTimeFormat().resolvedOptions().timeZone}）</label>
+                        <input id="x-schedule" type="datetime-local" disabled={detailBusy || !canEditCopy(selectedDraft)} value={xScheduleAt} onChange={e=>setXScheduleAt(e.target.value)}/>
+                        <p className="muted">留空立即发布。选择至少 5 分钟后的时间，保存后提交任务。原生排程确认后可关闭程序；本地任务需保持电脑唤醒、程序运行、联网和登录有效。退出或休眠期间错过的任务恢复后补发，失败不会自动重试。修改本地任务时间会取消原任务，需要重新提交。已提交的原生排程请前往平台修改。</p>
                       </div>}
+                      {selectedDraft.status === "local_scheduled" && <div className="schedule-box"><strong>本地定时：{new Date(selectedDraft.publishAt!).toLocaleString()}</strong><p>请保持电脑唤醒和程序运行。</p><button className="button secondary" disabled={detailBusy} onClick={() => void runBusy("正在取消定时…", async () => {await window.reach.updateDraft(selectedDraft.id, {publishAt:null}); setXScheduleAt(""); setNotice("已取消本地定时，草稿已保留。");})}>取消本地定时</button></div>}
                       <div
                         className={`native-drag-zone ${selectedDraft.preparedFolder ? "is-ready" : ""}`}
                         draggable={Boolean(selectedDraft.preparedFolder)}
@@ -540,7 +546,7 @@ function App() {
                         {selectedDraft.copyGroupId && <><label htmlFor="draft-copy-mode">文案方式</label><select id="draft-copy-mode" disabled={detailBusy || !canEditCopy(selectedDraft)} value={selectedDraft.captionMode || "independent"} onChange={e=>switchCaptionMode(e.target.value as "shared" | "independent")}><option value="shared">使用统一文案</option><option value="independent">使用独立文案</option></select><p className="muted">{selectedDraft.captionMode === "shared" ? `保存正文将同步本批次中使用统一文案的 ${drafts.filter(d=>d.copyGroupId===selectedDraft.copyGroupId && d.captionMode==="shared" && canEditCopy(d)).length} 条可编辑草稿。已发布、已排程及结果待确认的草稿不受影响。` : "仅修改当前草稿；切换为统一文案时会保留独立版本。"}</p></>}
                         <div className="label-row"><label htmlFor="draft-caption">正文文案</label><button className="text-button" onClick={generateCaption} disabled={detailBusy || !canEditCopy(selectedDraft) || !settings.hasDeepSeekKey}><Sparkles size={14}/> AI 生成独立文案</button></div>
                         <p className="muted">AI 生成将使用当前平台的独立文案。标题、话题标签、图片说明、图板和定时时间始终分别设置。</p>
-                        <textarea id="draft-caption" maxLength={5000} disabled={detailBusy || !canEditCopy(selectedDraft)} rows={6} value={caption} onChange={(e) => setCaption(e.target.value)} placeholder="输入文案，或使用 AI 生成…"/>
+                        <CaptionEditor key={selectedDraft.id + selectedDraft.captionMode} id="draft-caption" maxLength={5000} disabled={detailBusy || !canEditCopy(selectedDraft)} rows={6} value={caption} html={captionHtml} onChange={(value,html)=>{setCaption(value);setCaptionHtml(html);}} placeholder="输入文案，或使用 AI 生成…"/>
                       </div>
                       <div className="field">
                         <label>平台话题标签（发布时附加在正文后，以空格分隔）</label>
@@ -579,7 +585,7 @@ function App() {
                 <div className="field"><label>登录与发布浏览器</label><p>Google Chrome（需已安装）</p></div>
                 <label><input type="checkbox" disabled={browserBusy} checked={browserSettings.showBrowser} onChange={e=>void runBusy("正在保存浏览器设置…",async()=>{setBrowserSettings(await window.reach.saveBrowserSettings({...browserSettings,showBrowser:e.target.checked}));})}/> 显示浏览器（发布时打开可见窗口）</label>
                 <p className="muted">登录始终使用可见的普通 Chrome；上方开关仅控制发布窗口。各平台配置独立，不影响日常 Chrome。旧 Edge / Chromium 配置保留，但需在 Chrome 中重新登录。保存登录不代表平台允许发布。</p>
-                {(["instagram","x","pinterest","tiktok","bluesky"] as Platform[]).map(platform=><div className="settings-actions" key={platform}>
+                {(["instagram","x","pinterest","tiktok","bluesky","facebook"] as Platform[]).map(platform=><div className="settings-actions" key={platform}>
                   <button className="button secondary" disabled={browserBusy} onClick={()=>void runBusy("正在打开登录窗口…",()=>window.reach.openPlatformBrowser(platform))}>登录 {PLATFORM_META[platform].label}</button>
                   <button className="button secondary" disabled={browserBusy} onClick={()=>void runBusy("正在保存登录配置…",async()=>{await window.reach.closePlatformBrowser(platform);setNotice("窗口已关闭，浏览器配置已保存。发布时将检查登录是否有效。");})}>完成 {PLATFORM_META[platform].label} 登录 / 关闭窗口</button>
                 </div>)}
