@@ -4,6 +4,7 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import { initStore, getStore, persistStore, getAppPaths, findDraft, findImage } from "./store";
 import { importFiles, listImages, deleteImage } from "./image-service";
+import { saveVolcKeys, clearVolcKeys, generateImage, resumeImageTask, discardImageTask, getGeneratedImage, saveGeneratedImage, loadEditImage } from "./image-generation";
 import { createDrafts, listDrafts, deleteDraft, deleteDrafts, deletePublishRecords, updateDraft, prepareDraft, markPublished, scheduleDraft } from "./draft-service";
 import { generateCaption, generateSharedCaption, saveDeepSeekKey, clearDeepSeekKey, getSettings } from "./ai-service";
 import type { CopyOptions, Platform } from "../shared/types";
@@ -157,6 +158,18 @@ function registerIpc() {
   handle("drafts:schedule", (_event, id: string, date: string) => { assertNotPublishing(id); return scheduleDraft(id, date); });
 
   handle("settings:get", () => getSettings());
+  handle("settings:volc-save", (_event, ak, sk) => saveVolcKeys(ak, sk));
+  handle("settings:volc-clear", () => clearVolcKeys());
+  handle("images:generate", (_event, input) => generateImage(input));
+  handle("images:generated", () => getGeneratedImage());
+  handle("images:pick-edit", async () => {
+    const result = await dialog.showOpenDialog({ title: "上传编辑底图", properties: ["openFile"], filters: [{ name: "图片", extensions: ["jpg", "jpeg", "png", "webp", "avif", "heic", "heif", "gif", "tif", "tiff"] }] });
+    if (result.canceled || !result.filePaths[0]) return null;
+    return loadEditImage(result.filePaths[0]);
+  });
+  handle("images:save-generated", (_event, taskId) => saveGeneratedImage(taskId));
+  handle("images:resume", () => resumeImageTask());
+  handle("images:discard", () => discardImageTask());
   handle("settings:platforms", () => getPlatformDefaults());
   handle("settings:platform-save", (_event, platform, value) => savePlatformDefaults(platform, value));
   handle("settings:save-key", (_event, key: string) => saveDeepSeekKey(key));

@@ -2,6 +2,20 @@
 
 Local-first Electron desktop assistant for preparing image posts for Instagram, X, Pinterest, TikTok, Bluesky and Facebook. Windows and macOS packaging instructions: [DESKTOP-BUILD.md](DESKTOP-BUILD.md).
 
+### 火山引擎文生图与图片编辑
+
+在火山引擎控制台开通视觉智能服务中的通用 3.0 文生图与 SeedEdit 3.0，并获取有相应权限的 Access Key ID / Secret Access Key。在应用「设置 → 火山引擎图片生成与编辑」保存 AK/SK；这里使用视觉智能的访问密钥，不使用方舟 API Key。凭据由系统安全存储加密，主进程负责签名与调用，不回传密钥给界面。
+
+- 「素材库 → AI 生成图片 → 通用 3.0 文生图」：输入描述并选择尺寸，点击「生成图片」查看预览；满意后点击「保存到素材库」，或点击「丢弃结果」。生成本身不写入素材库。
+- 「SeedEdit 3.0 图片编辑」：点击「上传本地图片」选择 JPEG/PNG，或从素材库选择底图，输入编辑指令并设置强度。本地上传不导入素材库，选择文件仅在本机读取和预览，点击生成时才发送底图和指令至火山引擎。底图最大 5 MB，宽高均不超过 4096，长短边比例不超过 3。结果先预览再手动保存，原图保留。
+- 每次一张，火山任务串行执行。任务编号保存在本地，查询失败或重启后可在工作台点击「继续查询」，不会重新提交生成请求。放弃任务记录不会取消云端任务，也不会撤销计费。提交响应丢失时没有可恢复的任务编号，应先在控制台核对调用记录。
+- 生成后以 Base64 获取图片并在内存中保留预览，输出上限 20 MB。点击保存才写入素材库；保存失败保留预览，可直接重试保存。收起面板或切换页面后仍可恢复预览，退出应用后需通过「继续查询」恢复云端结果（受云端任务有效期限制）。图片编辑也先预览再保存。保留服务默认生成标识配置。应用不保证免费额度，也不自动重试生成请求；体验额度和后续收费以控制台为准。
+- 已移除智谱生图集成；首次启动新版时移除旧智谱加密密钥字段，已有图片保留。DeepSeek 文案功能不受影响。
+
+接入的是[通用 3.0 文生图异步接口](https://docs.volcengine.com/docs/large-model-of-image-generation/universal-30-text-to-image-1?lang=zh)（`high_aes_general_v30l_zt2i`）和 [SeedEdit 3.0](https://docs.volcengine.com/docs/large-model-of-image-generation/graphics30-instruction-editing-seededit30?lang=zh)（`seededit_v3.0`），采用 `CVSync2AsyncSubmitTask` / `CVSync2AsyncGetResult`、版本 `2022-08-31`，签名地域 `cn-north-1`、服务 `cv`。
+
+验证：`node tests/image-generation.test.mjs`、`npm run typecheck`、`npm run build`。测试使用模拟响应，不提交真实云端任务。开发版运行 `npm run dev`；安装版需重新打包。
+
 ### Facebook 一键发布
 
 1. 重启应用，在设置中点击 **登录 Facebook**，在专用 Chrome 中登录并选定发布身份和受众，然后点击 **完成登录 / 关闭窗口**。

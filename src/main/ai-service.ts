@@ -205,6 +205,8 @@ export async function clearDeepSeekKey() {
 export function getSettings() {
   return {
     hasDeepSeekKey: Boolean(getStore().settings.deepSeekKeyEncrypted),
+    hasVolcKeys: Boolean(getStore().settings.volcKeysEncrypted),
+    hasPendingImageTask: Boolean(getStore().settings.volcPendingTask),
     model: getStore().settings.model || "deepseek-flash"
   };
 }

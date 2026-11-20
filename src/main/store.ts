@@ -16,6 +16,8 @@ export interface StoreData {
   settings: {
     platformDefaults?: Partial<PlatformDefaultsMap>;
     deepSeekKeyEncrypted?: string;
+    volcKeysEncrypted?: string;
+    volcPendingTask?: { id: string; reqKey: string };
     model?: string;
     showBrowser?: boolean;
     browserChannel?: "msedge" | "chrome" | "chromium";
@@ -55,6 +57,10 @@ export async function initStore() {
   data.images ??= [];
   data.drafts ??= [];
   data.settings ??= { model: "deepseek-flash" };
+  if ("zhipuKeyEncrypted" in data.settings) {
+    delete data.settings.zhipuKeyEncrypted;
+    await persistStore();
+  }
   data.settings.model ??= "deepseek-flash";
 }
 

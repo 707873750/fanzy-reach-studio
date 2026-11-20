@@ -13,6 +13,7 @@ import { isVideo, videoIssues, VIDEO_RULES } from "../../shared/video-rules";
 
 import RunLogs from "./RunLogs";
 import PlatformSettings from "./PlatformSettings";
+import ImageGenerator, { ImageGenerationSettings } from "./ImageGenerator";
 import PublishHistory from "./PublishHistory";
 import CaptionEditor from "./CaptionEditor";
 
@@ -40,6 +41,7 @@ function App() {
   const [hashtags, setHashtags] = useState("");
   const [settings, setSettings] = useState<SettingsView>({ hasDeepSeekKey: false, model: "deepseek-flash" });
   const [apiKey, setApiKey] = useState("");
+  const [showImageGenerator, setShowImageGenerator] = useState(false);
   const [caption, setCaption] = useState("");
   const [captionHtml, setCaptionHtml] = useState<string | undefined>();
   const [title, setTitle] = useState("");
@@ -422,10 +424,17 @@ function App() {
               <section className="page-heading">
                 <div><div className="eyebrow">素材管理</div><h1>素材库</h1><p>导入和管理图片、视频，为各个平台准备发布素材。</p></div>
                 <div className="heading-actions">
+                  <button className="button secondary" disabled={busy} onClick={() => setShowImageGenerator(value => !value)}><Sparkles size={16}/> AI 生成图片</button>
                   <button className="button secondary" onClick={importFolder} disabled={busy}><FolderOpen size={16}/> 导入文件夹</button>
                   <button className="button primary" onClick={importFiles} disabled={busy}><ImagePlus size={16}/> 导入图片 / 视频</button>
                 </div>
               </section>
+
+              {showImageGenerator && <ImageGenerator busy={busy} settings={settings} setSettings={setSettings} runBusy={runBusy} images={images} selectedImages={selectedImages} onSettings={() => setPage("settings")} onClose={() => setShowImageGenerator(false)} onResult={result => {
+                setSearch(""); setFolderFilter(""); setMediaFilter("");
+                if (result.imported.length) setSelectedImages(result.imported.map(image => image.id));
+                setNotice(result.imported.length ? "图片已保存到素材库，可预览或创建发布草稿。" : "结果与已有素材重复，已保留素材库中的原图。");
+              }}/>}
 
               <section className="stats-grid">
                 <div className="stat-card"><span>素材总数</span><strong>{images.length}</strong><small>本地保存</small></div>
@@ -659,6 +668,7 @@ function App() {
                 <div className="key-status"><span className={`status-dot ${settings.hasDeepSeekKey ? "published" : "draft"}`}/>{settings.hasDeepSeekKey ? "已配置 DeepSeek API 密钥" : "AI 为可选功能，也可以手动创建和编辑文案。"}</div>
                 <a href="https://platform.deepseek.com/" onClick={(e) => { e.preventDefault(); void window.reach.openExternal("https://platform.deepseek.com/"); }}>获取 DeepSeek API 密钥 <ArrowUpRight size={14}/></a>
               </section>
+              <ImageGenerationSettings busy={busy} settings={settings} setSettings={setSettings} runBusy={runBusy}/>
               <PlatformSettings/>
               <section className="panel"><h2>隐私说明</h2><p className="muted">图片、草稿和导出文件均保存在本地。生成 AI 文案时，会将所选图片发送至 DeepSeek；发布时将内容上传至所选平台。各平台使用本机独立保存的浏览器配置。</p></section>
             </>

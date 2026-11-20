@@ -1,3 +1,4 @@
+import type { GenerateImageRequest, GeneratedImagePreview, EditImageUpload } from "./image-generation";
 export type Platform = "instagram" | "x" | "pinterest" | "tiktok" | "bluesky" | "facebook";
 export interface PlatformDefaults {
   imagesPerDraft: number;
@@ -76,6 +77,8 @@ export interface Draft {
 }
 
 export interface SettingsView {
+  hasVolcKeys?: boolean;
+  hasPendingImageTask?: boolean;
   hasDeepSeekKey: boolean;
   model: string;
 }
@@ -91,6 +94,14 @@ export interface CreateDraftResult {
 }
 
 export interface ReachApi {
+  saveVolcKeys: (ak: string, sk: string) => Promise<SettingsView>;
+  clearVolcKeys: () => Promise<SettingsView>;
+  pickEditImage: () => Promise<EditImageUpload | null>;
+  getGeneratedImage: () => Promise<GeneratedImagePreview | null>;
+  saveGeneratedImage: (taskId: string) => Promise<ImportResult>;
+  resumeImageTask: () => Promise<GeneratedImagePreview>;
+  discardImageTask: () => Promise<SettingsView>;
+  generateImage: (input: GenerateImageRequest) => Promise<GeneratedImagePreview>;
   reportUiPerformance: (sample: Record<string, number | boolean>) => Promise<void>;
   getPlatformDefaults: () => Promise<PlatformDefaultsMap>;
   savePlatformDefaults: (platform: Platform, value: PlatformDefaults) => Promise<PlatformDefaults>;

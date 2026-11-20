@@ -1,8 +1,17 @@
+import type { GenerateImageRequest, GeneratedImagePreview, EditImageUpload } from "../shared/image-generation";
 import { contextBridge, ipcRenderer } from "electron";
 import type { PlatformDefaults, PlatformDefaultsMap } from "../shared/types";
 import type { BrowserSettings, CopyOptions, DraftPatch, Draft, ImageAsset, ImportResult, Platform, SettingsView, RunLog, LogSnapshot } from "../shared/types";
 
 const api = {
+  saveVolcKeys: (ak: string, sk: string): Promise<SettingsView> => ipcRenderer.invoke("settings:volc-save", ak, sk),
+  clearVolcKeys: (): Promise<SettingsView> => ipcRenderer.invoke("settings:volc-clear"),
+  pickEditImage: (): Promise<EditImageUpload | null> => ipcRenderer.invoke("images:pick-edit"),
+  getGeneratedImage: (): Promise<GeneratedImagePreview | null> => ipcRenderer.invoke("images:generated"),
+  saveGeneratedImage: (taskId: string): Promise<ImportResult> => ipcRenderer.invoke("images:save-generated", taskId),
+  resumeImageTask: (): Promise<GeneratedImagePreview> => ipcRenderer.invoke("images:resume"),
+  discardImageTask: (): Promise<SettingsView> => ipcRenderer.invoke("images:discard"),
+  generateImage: (input: GenerateImageRequest): Promise<GeneratedImagePreview> => ipcRenderer.invoke("images:generate", input),
   reportUiPerformance: (sample: Record<string, number | boolean>): Promise<void> => ipcRenderer.invoke("performance:ui", sample),
   getPlatformDefaults: (): Promise<PlatformDefaultsMap> => ipcRenderer.invoke("settings:platforms"),
   savePlatformDefaults: (platform: Platform, value: PlatformDefaults): Promise<PlatformDefaults> => ipcRenderer.invoke("settings:platform-save", platform, value),
