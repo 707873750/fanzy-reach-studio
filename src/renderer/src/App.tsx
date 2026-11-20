@@ -17,6 +17,7 @@ import PublishHistory from "./PublishHistory";
 type Page = "library" | "queue" | "history" | "settings" | "logs";
 const STATUS_LABEL: Record<string, string> = {draft:"草稿",ready:"待发布",scheduled:"已定时",prepared:"素材已准备",published:"已发布",reminder_due:"提醒已到期",platform_scheduled:"平台已排程",running:"正在发布",needs_attention:"需要处理",uncertain:"已提交，结果待确认",succeeded:"发布成功"};
 const PLATFORM_META: Record<Platform, { label: string; url: string; icon: typeof Instagram; color: string }> = {
+  bluesky: { label: "Bluesky", url: "https://bsky.app/", icon: Twitter, color: "#0085FF" },
   instagram: { label: "Instagram", url: "https://www.instagram.com/", icon: Instagram, color: "#E879A6" },
   x: { label: "X", url: "https://x.com/compose/post", icon: Twitter, color: "#D8DEE9" },
   pinterest: { label: "Pinterest", url: "https://www.pinterest.com/", icon: Aperture, color: "#E35D68" },
@@ -31,8 +32,8 @@ function App() {
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [pendingImageDeleteIds, setPendingImageDeleteIds] = useState<string[] | null>(null);
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
-  const [platforms, setPlatforms] = useState<Platform[]>(["instagram", "x", "pinterest", "tiktok"]);
-  const [copyOptions, setCopyOptions] = useState<CopyOptions>({sharedCaption:"", platforms:{instagram:{mode:"shared",caption:""},x:{mode:"shared",caption:""},pinterest:{mode:"shared",caption:""},tiktok:{mode:"shared",caption:""}}});
+  const [platforms, setPlatforms] = useState<Platform[]>(["instagram", "x", "pinterest", "tiktok", "bluesky"]);
+  const [copyOptions, setCopyOptions] = useState<CopyOptions>({sharedCaption:"", platforms:{bluesky:{mode:"shared",caption:""},instagram:{mode:"shared",caption:""},x:{mode:"shared",caption:""},pinterest:{mode:"shared",caption:""},tiktok:{mode:"shared",caption:""}}});
   const [hashtags, setHashtags] = useState("");
   const [settings, setSettings] = useState<SettingsView>({ hasDeepSeekKey: false, model: "deepseek-flash" });
   const [apiKey, setApiKey] = useState("");
@@ -229,6 +230,35 @@ function App() {
     });
   };
 
+  const generateSelectedCaptions = () => {
+    if (busy || publishing || !settings.hasDeepSeekKey) return;
+    const targets = selectedDrafts.filter(draft => canEditCopy(draft) && !draftLocked(draft));
+    if (!targets.length) return;
+    void runBusy("正在批量生成独立文案…", async () => {
+      const succeeded: string[] = [];
+      const failures: string[] = [];
+      for (const [index, draft] of targets.entries()) {
+        setBusyText(`AI 生成独立文案 ${index + 1}/${targets.length} · ${PLATFORM_META[draft.platform].label}`);
+        try {
+          const updated = await window.reach.generateCaption(draft.id);
+          succeeded.push(draft.id);
+          setDrafts(old => old.map(item => item.id === updated.id ? updated : item));
+        } catch (error) {
+          failures.push(`${PLATFORM_META[draft.platform].label}（${draft.id.slice(0, 8)}）：${error instanceof Error ? error.message : "生成失败"}`);
+        }
+      }
+      const skipped = selectedDrafts.length - targets.length;
+      setNotice(`AI 独立文案已生成 ${succeeded.length}/${targets.length} 条。${skipped ? `跳过 ${skipped} 条不可编辑草稿。` : ""}${failures.length ? `失败 ${failures.length} 条：${failures.slice(0, 3).join("；")}` : "请核对文案后再发布。"}`);
+    });
+  };
+  const generateSelectedSharedCaption = () => {
+    if (busy || publishing || !settings.hasDeepSeekKey || !selectedDrafts.length || selectedDrafts.some(d => !canEditCopy(d) || draftLocked(d))) return;
+    void runBusy("正在为所选草稿生成统一文案…", async () => {
+      const updated = await window.reach.generateSharedCaption(selectedDrafts.map(d => d.id));
+      setNotice(`已为 ${updated.length} 条草稿生成统一正文，并建立共享关联。修改其中一条共享正文会同步到本组；标题、话题等仍分别保留。`);
+    });
+  };
+
   const prepare = () => {
     if (!selectedDraft) return;
     void runBusy("正在准备发布素材…", async () => {
@@ -387,7 +417,7 @@ function App() {
               <section className="panel create-panel">
                 <div className="panel-heading"><div><h2>创建发布草稿</h2><p>选择发布平台，图片将按各平台的默认数量分组，并带入已保存的图板、标签和定时偏好。</p></div><button className="text-button" onClick={()=>setPage("settings")}>配置各平台默认选项</button></div>
                 <div className="platform-options">
-                  {(["instagram", "x", "pinterest", "tiktok"] as Platform[]).map((platform) => {
+                  {(["instagram", "x", "pinterest", "tiktok", "bluesky"] as Platform[]).map((platform) => {
                     const meta = PLATFORM_META[platform];
                     const Icon = meta.icon;
                     return <button key={platform} className={`platform-option ${platforms.includes(platform) ? "chosen" : ""}`} onClick={() => togglePlatform(platform)}>
@@ -427,7 +457,11 @@ function App() {
                   <button className="button secondary" disabled={busy} onClick={() => setCheckedDrafts(queueDrafts.filter(d => canPublish(d) && !draftLocked(d)).slice(0, 100).map((d) => d.id))}>选择可发布草稿（最多 100 条）</button>
                   <button className="button secondary" disabled={busy} onClick={() => setCheckedDrafts([])}>清空选择</button>
                   <button className="button primary" disabled={browserBusy || !canSubmitSelection} onClick={publishSelected}><Send size={16}/> 提交选中的 {selectedDrafts.length} 条</button>
+                  <button className="button secondary" disabled={busy || publishing || !settings.hasDeepSeekKey || !selectedDrafts.some(d => canEditCopy(d) && !draftLocked(d))} onClick={generateSelectedCaptions}><Sparkles size={16}/> AI 批量生成独立文案</button>
+                  <button className="button secondary" disabled={busy || publishing || !settings.hasDeepSeekKey || !selectedDrafts.length || selectedDrafts.length > 100 || selectedDrafts.some(d => !canEditCopy(d) || draftLocked(d))} onClick={generateSelectedSharedCaption}><Sparkles size={16}/> AI 生成统一文案</button>
                 </div>
+                <p className="muted">批量 AI 会分别按平台生成并替换所选草稿的标题、正文、话题和图片说明，自动切换为独立文案。生成期间显示进度，单条失败不影响后续草稿。</p>
+                <p className="muted">统一 AI 使用所选草稿的去重图片（最多 35 张）生成一份共享正文，保留各平台标题和话题，以及原独立正文备份。</p>
               </section>
               <div className="queue-layout">
                 <section className="panel draft-list">
@@ -545,7 +579,7 @@ function App() {
                 <div className="field"><label>登录与发布浏览器</label><p>Google Chrome（需已安装）</p></div>
                 <label><input type="checkbox" disabled={browserBusy} checked={browserSettings.showBrowser} onChange={e=>void runBusy("正在保存浏览器设置…",async()=>{setBrowserSettings(await window.reach.saveBrowserSettings({...browserSettings,showBrowser:e.target.checked}));})}/> 显示浏览器（发布时打开可见窗口）</label>
                 <p className="muted">登录始终使用可见的普通 Chrome；上方开关仅控制发布窗口。各平台配置独立，不影响日常 Chrome。旧 Edge / Chromium 配置保留，但需在 Chrome 中重新登录。保存登录不代表平台允许发布。</p>
-                {(["instagram","x","pinterest","tiktok"] as Platform[]).map(platform=><div className="settings-actions" key={platform}>
+                {(["instagram","x","pinterest","tiktok","bluesky"] as Platform[]).map(platform=><div className="settings-actions" key={platform}>
                   <button className="button secondary" disabled={browserBusy} onClick={()=>void runBusy("正在打开登录窗口…",()=>window.reach.openPlatformBrowser(platform))}>登录 {PLATFORM_META[platform].label}</button>
                   <button className="button secondary" disabled={browserBusy} onClick={()=>void runBusy("正在保存登录配置…",async()=>{await window.reach.closePlatformBrowser(platform);setNotice("窗口已关闭，浏览器配置已保存。发布时将检查登录是否有效。");})}>完成 {PLATFORM_META[platform].label} 登录 / 关闭窗口</button>
                 </div>)}

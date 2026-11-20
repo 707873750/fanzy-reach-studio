@@ -1,6 +1,6 @@
 # Fanzy Reach Studio
 
-Local-first Windows desktop assistant for preparing image posts for Instagram, X and Pinterest.
+Local-first Windows desktop assistant for preparing image posts for Instagram, X, Pinterest, TikTok and Bluesky.
 
 ## What this starter does
 
@@ -222,7 +222,17 @@ Use the app's own UI to manage data. Do not manually edit `reach-data.json` whil
 
 ## 跨平台并行发布
 
-批量勾选不同平台的草稿后，TikTok、Instagram、X、Pinterest 各自使用独立 Python 工作进程及浏览器配置，并行上传与发布（最多四个平台）。同一平台的多条草稿按所选顺序逐条执行。
+批量勾选不同平台的草稿后，TikTok、Instagram、X、Pinterest、Bluesky 各自使用独立 Python 工作进程及浏览器配置，并行上传与发布（最多五个平台）。同一平台的多条草稿按所选顺序逐条执行。
+
+### Bluesky 图片发布
+
+在「设置与账号」点击「登录 Bluesky」，登录后点击「完成登录 / 关闭窗口」。在素材库选择 Bluesky 创建草稿，再到发布队列勾选并提交，可与其他平台同时发布，也支持 AI 独立文案和统一文案。
+
+当前接入每条 1–4 张图片，导出时按比例缩放至 1600 × 1600 以内。标题、正文和话题合并发布，提交前按 Unicode 字素检查 300 字符限制。填写的替代文本会应用到每张图片。
+
+成功确认被动监听本次浏览器发出的 createRecord / applyWrites 请求，核对正文、图片数量、记录类型和返回的帖子 URI/CID；不会另行调用发布接口或自动重发。没有明确确认时保留「结果待确认」，不因页面跳转或旧帖子误报成功。实现参考 [Bluesky 官方发帖文档](https://docs.bsky.app/docs/tutorials/creating-a-post) 与官方网页客户端的控件标识。
+
+隔离验证：`.venv\Scripts\python.exe -m unittest discover -s python -p test_bluesky.py -v`。这些测试拦截平台请求，不代表真实账号端到端验证。
 
 提交检查点、超时和结果分别归属各平台进程；某平台失败或结果待确认仅暂停该平台的后续任务。整个批次完成前仍锁定所选草稿并禁止启动另一个批次。退出时会关闭全部平台工作进程。
 

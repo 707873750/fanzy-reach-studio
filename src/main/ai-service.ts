@@ -1,8 +1,10 @@
 import { safeStorage } from "electron";
+import crypto from "node:crypto";
 import sharp from "sharp";
 import { getStore, findDraft, findImage, persistStore, updateDraftRecord } from "./store";
 import type { Draft, Platform } from "../shared/types";
 import { canEditCopy } from "../shared/draft-copy";
+import { assertNotPublishing } from "./browser-publisher";
 
 async function getApiKey() {
   const encrypted = getStore().settings.deepSeekKeyEncrypted;
@@ -15,6 +17,12 @@ async function getApiKey() {
 
 function promptFor(platform: Platform, imageCount: number) {
   const common = `You are a professional social media copywriter. Analyze the attached image(s), describe only visible facts, do not invent products, people, locations, claims or offers. Write natural English copy. Return valid JSON only. There are ${imageCount} image(s).`;
+  if (platform === "bluesky") {
+    return `${common}
+Create one Bluesky post under 280 characters including hashtags. Output JSON:
+{"title":"","caption":"...","hashtags":[],"alt_text":""}
+Keep it concise. Do not invent claims or links.`;
+  }
   if (platform === "instagram") {
     return `${common}
 Create one Instagram carousel caption. Output JSON:
@@ -39,19 +47,36 @@ Create a Pinterest Pin. Output JSON:
 Use descriptive keywords naturally. Do not keyword-stuff.`;
 }
 
-export async function generateCaption(draftId: string): Promise<Draft> {
+export async function generateSharedCaption(ids: string[]): Promise<Draft[]> {
+  if (!Array.isArray(ids) || !ids.length || ids.length > 100 || ids.some(id => typeof id !== "string")) throw new Error("请选择 1 至 100 条草稿");
+  const unique = [...new Set(ids)];
+  await generateCaption(unique[0], unique);
+  return unique.map(id => findDraft(id)!);
+}
+
+export async function generateCaption(draftId: string, sharedIds?: string[]): Promise<Draft> {
+  assertNotPublishing(draftId);
   const draft = findDraft(draftId);
   if (!draft) throw new Error("未找到草稿");
   if (!canEditCopy(draft)) throw new Error("已提交的草稿不能生成文案，请先核对发布结果");
+  const version = draft.updatedAt;
+  const sharedDrafts = sharedIds?.map(id => {
+    assertNotPublishing(id);
+    const item = findDraft(id);
+    if (!item || !canEditCopy(item)) throw new Error("所选草稿包含不可编辑项");
+    return {item, version:item.updatedAt};
+  });
+  const imageIds = sharedDrafts ? [...new Set(sharedDrafts.flatMap(({item}) => item.imageIds))] : draft.imageIds;
+  if (imageIds.length > 35) throw new Error("统一生成每次最多使用 35 张不同图片，请减少所选草稿");
   const apiKey = await getApiKey();
 
   const imageParts: Array<{ type: "text" | "image_url"; text?: string; image_url?: { url: string; detail: "low" } }> = [
-    { type: "text", text: promptFor(draft.platform, draft.imageIds.length) }
+    { type: "text", text: sharedDrafts ? `Write one concise natural English social media caption suitable for all these platforms: ${[...new Set(sharedDrafts.map(({item}) => item.platform))].join(', ')}. Base it only on visible facts in the attached images. Do not invent claims. Keep it under 240 characters. Return JSON with caption (nonempty string), title (empty string), hashtags (empty array), alt_text (empty string).` : promptFor(draft.platform, draft.imageIds.length) }
   ];
 
-  for (let index = 0; index < draft.imageIds.length; index++) {
-    const image = findImage(draft.imageIds[index]);
-    if (!image) continue;
+  for (const imageId of imageIds) {
+    const image = findImage(imageId);
+    if (!image) throw new Error("草稿中的图片已不存在");
     const bytes = await sharp(image.originalPath)
       .rotate()
       .resize(768, 768, { fit: "inside", withoutEnlargement: true })
@@ -81,6 +106,14 @@ export async function generateCaption(draftId: string): Promise<Draft> {
         max_tokens: 1200
       }),
       signal: controller.signal
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) {
+        throw new Error("连接 DeepSeek 超时（120 秒），原草稿已保留，请稍后重新生成。");
+      }
+      const cause = (error as { cause?: { code?: unknown } } | null)?.cause;
+      const code = typeof cause?.code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(cause.code)
+        ? `（${cause.code}）` : "";
+      throw new Error(`无法连接 DeepSeek${code}，原草稿已保留。请检查网络或代理连接后重新生成。`);
     });
 
     const body = await response.json() as {
@@ -99,6 +132,31 @@ export async function generateCaption(draftId: string): Promise<Draft> {
       hashtags?: string[];
       alt_text?: string;
     };
+
+    if (!parsed || typeof parsed.caption !== "string" || !parsed.caption.trim() ||
+        [parsed.title, parsed.alt_text].some(value => value !== undefined && typeof value !== "string") ||
+        (parsed.hashtags !== undefined && (!Array.isArray(parsed.hashtags) || parsed.hashtags.some(tag => typeof tag !== "string")))) {
+      throw new Error("AI 返回的文案格式无效，原草稿已保留");
+    }
+    assertNotPublishing(draftId);
+    const current = findDraft(draftId);
+    if (!current || !canEditCopy(current) || current.updatedAt !== version) throw new Error("生成期间草稿已修改或开始发布，未覆盖现有内容");
+
+    if (sharedDrafts) {
+      for (const {item, version} of sharedDrafts) {
+        assertNotPublishing(item.id);
+        const live = findDraft(item.id);
+        if (!live || !canEditCopy(live) || live.updatedAt !== version) throw new Error("生成期间所选草稿发生变化，未覆盖任何文案");
+      }
+      const copyGroupId = crypto.randomUUID();
+      for (const {item} of sharedDrafts) updateDraftRecord(item.id, {
+        copyGroupId, captionMode:"shared", sharedCaption:parsed.caption, caption:parsed.caption,
+        independentCaption:item.captionMode === "shared" ? item.independentCaption : item.caption,
+        status:"ready"
+      });
+      await persistStore();
+      return findDraft(draftId)!;
+    }
 
     const updated = updateDraftRecord(draftId, {
       title: parsed.title || "",

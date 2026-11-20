@@ -47,6 +47,8 @@ const api = {
     ipcRenderer.invoke("drafts:update", id, patch),
   generateCaption: (id: string): Promise<Draft> =>
     ipcRenderer.invoke("drafts:generate", id),
+  generateSharedCaption: (ids: string[]): Promise<Draft[]> =>
+    ipcRenderer.invoke("drafts:generate-shared", ids),
   getSettings: (): Promise<SettingsView> =>
     ipcRenderer.invoke("settings:get"),
   saveDeepSeekKey: (key: string): Promise<SettingsView> =>

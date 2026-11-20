@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import { initStore, getStore, persistStore, getAppPaths, findDraft } from "./store";
 import { importFiles, listImages, deleteImage } from "./image-service";
 import { createDrafts, listDrafts, deleteDraft, deleteDrafts, deletePublishRecords, updateDraft, prepareDraft, markPublished, scheduleDraft } from "./draft-service";
-import { generateCaption, saveDeepSeekKey, clearDeepSeekKey, getSettings } from "./ai-service";
+import { generateCaption, generateSharedCaption, saveDeepSeekKey, clearDeepSeekKey, getSettings } from "./ai-service";
 import type { CopyOptions, Platform } from "../shared/types";
 import { assertNotPublishing, getBrowserSettings, saveBrowserSettings, closePlatformBrowser, openPlatformBrowser, publishDrafts, resolvePublish, recoverPublishing, stopPublisher } from "./browser-publisher";
 
@@ -92,7 +92,7 @@ function registerIpc() {
   handle("images:delete", (_event, imageId: string) => deleteImage(imageId));
 
   handle("drafts:create", (_event, imageIds: string[], platforms: Platform[], copy?: CopyOptions) => {
-    const allowed = ["instagram", "x", "pinterest", "tiktok"];
+    const allowed = ["instagram", "x", "pinterest", "tiktok", "bluesky"];
     if (!Array.isArray(imageIds) || !Array.isArray(platforms) || platforms.some((p) => !allowed.includes(p))) {
       throw new Error("无效的草稿请求");
     }
@@ -117,6 +117,7 @@ function registerIpc() {
     return updateDraft(id, patch);
   });
   handle("drafts:generate", (_event, id: string) => { assertNotPublishing(id); return generateCaption(id); });
+  handle("drafts:generate-shared", (_event, ids: string[]) => generateSharedCaption(ids));
   handle("drafts:prepare", (_event, id: string) => { assertNotPublishing(id); return prepareDraft(id); });
 
   // Native file drag: the user initiates the drag from the app and drops files
@@ -133,7 +134,7 @@ function registerIpc() {
     if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return;
     if (!fsSync.existsSync(preparedFolder)) return;
 
-    const maxFiles = draft.platform === "tiktok" ? 35 : draft.platform === "instagram" ? 10 : draft.platform === "x" ? 4 : 1;
+    const maxFiles = draft.platform === "tiktok" ? 35 : draft.platform === "instagram" ? 10 : (draft.platform === "x" || draft.platform === "bluesky") ? 4 : 1;
     const files = fsSync.readdirSync(preparedFolder, { withFileTypes: true })
       .filter((entry) => entry.isFile() && /\.(jpe?g|png|webp)$/i.test(entry.name))
       .slice(0, maxFiles)
@@ -156,6 +157,7 @@ function registerIpc() {
   handle("external:open", async (_event, url: string) => {
     const parsed = new URL(url);
     const allowedHosts = new Set([
+      "bsky.app",
       "www.instagram.com",
       "instagram.com",
       "x.com",

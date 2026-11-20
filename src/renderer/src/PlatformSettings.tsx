@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { Platform, PlatformDefaults, PlatformDefaultsMap } from "../../shared/types";
 import { defaultPlatformSettings } from "../../shared/platform-defaults";
 
-const labels = {instagram:"Instagram",x:"X",pinterest:"Pinterest",tiktok:"TikTok"};
+const labels = {instagram:"Instagram",x:"X",pinterest:"Pinterest",tiktok:"TikTok",bluesky:"Bluesky"};
 function PlatformCard({platform,initial}: {platform:Platform;initial:PlatformDefaults}) {
   const [value,setValue]=useState(initial);
   const [tags,setTags]=useState(initial.hashtags.join(" "));
@@ -21,7 +21,8 @@ function PlatformCard({platform,initial}: {platform:Platform;initial:PlatformDef
   return <section className="panel settings-panel" aria-label={`${labels[platform]} 默认配置`}>
     <h2>{labels[platform]} 默认配置</h2>
     <fieldset disabled={saving} style={{border:0,padding:0,margin:0,minWidth:0}}>
-      {platform!=="pinterest" && <div className="field"><label htmlFor={id("images")}>每条草稿的图片数量</label><input id={id("images")} type="number" min={1} max={platform==="tiktok"?35:platform==="x"?4:10} value={Number.isNaN(value.imagesPerDraft)?"":value.imagesPerDraft} onChange={e=>change({imagesPerDraft:e.target.valueAsNumber})}/><small>新建草稿时按此数量分组，最后一组可不足此数量。</small></div>}
+      {platform!=="pinterest" && <div className="field"><label htmlFor={id("images")}>每条草稿的图片数量</label><input id={id("images")} type="number" min={1} max={platform==="tiktok"?35:(platform==="x"||platform==="bluesky")?4:10} value={Number.isNaN(value.imagesPerDraft)?"":value.imagesPerDraft} onChange={e=>change({imagesPerDraft:e.target.valueAsNumber})}/><small>新建草稿时按此数量分组，最后一组可不足此数量。</small></div>}
+      {platform==="bluesky" && <small>当前支持每条 1–4 张图片，正文、标题和话题合计最多 300 字符。请先登录 Bluesky；收到本次帖子链接后自动确认发布成功。</small>}
       {platform==="tiktok" && <small>TikTok 图片轮播最多 35 张，按比例缩放至 1080 × 1920 以内。自动发布需要账号的网页端提供图片上传入口；仅支持视频时请使用手机端发布。</small>}
       {platform==="tiktok" && <div className="field"><label htmlFor={id("privacy")}>默认谁可以看</label><select id={id("privacy")} value={value.tiktokPrivacy || "self_only"} onChange={e=>change({tiktokPrivacy:e.target.value as "public" | "self_only"})}><option value="self_only">仅自己</option><option value="public">所有人</option></select></div>}
       {platform==="pinterest" && <>
@@ -47,6 +48,6 @@ export default function PlatformSettings() {
   useEffect(load,[]);
   return <>
     <section className="panel settings-panel"><h2>各平台独立配置</h2><p className="muted">分别保存在本机，创建新草稿时自动带入。修改默认配置不会覆盖已有草稿；每条草稿仍可单独调整。</p>{!values&&!error&&<p>正在读取配置…</p>}{error&&<><p role="alert">{error}</p><button className="button secondary" onClick={load}>重新读取配置</button></>}</section>
-    {values&&(["instagram","x","pinterest","tiktok"] as Platform[]).map(platform=><PlatformCard key={platform} platform={platform} initial={values[platform]}/>)}
+    {values&&(["instagram","x","pinterest","tiktok","bluesky"] as Platform[]).map(platform=><PlatformCard key={platform} platform={platform} initial={values[platform]}/>)}
   </>;
 }

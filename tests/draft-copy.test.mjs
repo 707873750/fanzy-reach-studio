@@ -97,6 +97,13 @@ assert.deepEqual(Array.from(tikTokBatch,d=>d.imageIds.length),[35,1]);
 assert.ok(tikTokBatch.every(d=>d.caption==='Photo story'&&d.xScheduledAt===null&&!d.boardName));
 assert.deepEqual(Array.from(tikTokBatch[0].imageIds),data.images.slice(0,35).map(i=>i.id));
 console.log('PASS: TikTok defaults migration, photo limits, ordered grouping and shared captions');
+assert.equal(readPlatformDefaults({x:{imagesPerDraft:2}}).bluesky.imagesPerDraft,4);
+assert.throws(()=>validatePlatformDefaults('bluesky',{...defaultPlatformSettings().bluesky,imagesPerDraft:5}));
+const blueskyBatch=await svc.createDrafts(['0','1','2','3','4'],['bluesky'],{sharedCaption:'Blue sky',platforms:{bluesky:{mode:'shared',caption:''}}});
+assert.deepEqual(Array.from(blueskyBatch,d=>d.imageIds.length),[4,1]);
+assert.equal(blueskyBatch[0].caption,'Blue sky');
+assert.equal(blueskyBatch[0].platform,'bluesky');
+console.log('PASS: Bluesky defaults migration, photo limits, grouping and shared copy');
 
 // Existing successful records move out of the queue without a data migration.
 const records = [make('published', {status:'published'}), make('platform-scheduled', {status:'platform_scheduled'}),

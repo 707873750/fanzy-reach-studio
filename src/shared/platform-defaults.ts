@@ -3,6 +3,7 @@ import type { Platform, PlatformDefaults, PlatformDefaultsMap } from "./types";
 export function defaultPlatformSettings(): PlatformDefaultsMap {
   const common = {hashtags: [], boardName: "", title: "", scheduleDelayMinutes: 0};
   return {
+    bluesky: {...common, hashtags: [], imagesPerDraft: 4},
     instagram: {...common, hashtags: [], imagesPerDraft: 10},
     x: {...common, hashtags: [], imagesPerDraft: 4},
     pinterest: {...common, hashtags: [], imagesPerDraft: 1},
@@ -11,7 +12,7 @@ export function defaultPlatformSettings(): PlatformDefaultsMap {
 }
 
 export function validatePlatformDefaults(platform: Platform, input: PlatformDefaults): PlatformDefaults {
-  if (!["instagram", "x", "pinterest", "tiktok"].includes(platform)) throw new Error("无效的平台");
+  if (!["instagram", "x", "pinterest", "tiktok", "bluesky"].includes(platform)) throw new Error("无效的平台");
   if (!input || typeof input !== "object") throw new Error("无效的平台配置");
   if (input?.tiktokPrivacy !== undefined && !["public", "self_only"].includes(input.tiktokPrivacy)) throw new Error("无效的 TikTok 隐私选项");
   const max = defaultPlatformSettings()[platform].imagesPerDraft;

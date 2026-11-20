@@ -3,6 +3,7 @@ import asyncio
 import base64
 import json
 import queue
+import re
 import sys
 import threading
 import traceback
@@ -15,10 +16,12 @@ from native_login import NativeChrome
 from performance_stats import system_sample
 from pinterest_confirmation import PinterestConfirmation
 from tiktok_confirmation import TikTokConfirmation
+from bluesky_confirmation import BlueskyConfirmation
 
 ADAPTER_PATH = Path(__file__).with_name('page_adapter.js')
 CHANNELS = ('msedge', 'chrome', 'chromium')
 LOGIN_URLS = {
+    'bluesky': 'https://bsky.app/',
     'x': 'https://x.com/i/flow/login',
     'instagram': 'https://www.instagram.com/',
     'pinterest': 'https://www.pinterest.com/',
@@ -200,7 +203,9 @@ class Publisher:
                 nonlocal context, page, monitor, checkpoint_requested, confirmation
                 context = await self.launch(job, visible=job.get('showBrowser') is True)
                 page = context.pages[0] if context.pages else await context.new_page()
-                if job['platform'] == 'pinterest':
+                if job['platform'] == 'bluesky':
+                    confirmation = BlueskyConfirmation(page, job)
+                elif job['platform'] == 'pinterest':
                     confirmation = PinterestConfirmation(page)
                 elif job['platform'] == 'tiktok':
                     confirmation = TikTokConfirmation(page, lambda detail: self.log('tiktok.confirmation_response', '本次提交后的响应结构（不记录正文、凭据或查询参数）', job, detail=detail))
@@ -213,6 +218,28 @@ class Publisher:
                     self.log(str(entry.get('step', 'page.event')), str(entry.get('message', '')), job,
                              entry.get('level', 'info'), entry.get('detail'), source='page')
                 await page.expose_binding('fanzyTrace', trace)
+                if job['platform'] == 'bluesky':
+                    async def bluesky_input(source, action):
+                        if source['frame'] != page.main_frame or checkpoint_requested:
+                            raise ValueError('Invalid Bluesky input phase')
+                        root = page.locator('[data-testid="composePostView"]')
+                        if action == 'text':
+                            editor = root.locator('[contenteditable="true"]')
+                            await editor.fill(confirmation.expected)
+                        elif action == 'images':
+                            async with page.expect_file_chooser(timeout=15000) as chooser:
+                                await root.locator('[data-testid="openMediaBtn"], [data-testid="openGalleryBtn"]').click()
+                            await (await chooser.value).set_files(job['files'])
+                        elif action == 'alt' and job.get('altText'):
+                            for index in range(job['fileCount']):
+                                await root.locator('[data-testid="altTextButton"]').nth(index).click()
+                                dialog = page.get_by_role('dialog').filter(has=page.locator('textarea'))
+                                await dialog.locator('textarea').fill(job['altText'])
+                                await dialog.get_by_role('button', name=re.compile(r'^(Save|保存|儲存)$')).click()
+                                await dialog.wait_for(state='hidden')
+                        else:
+                            raise ValueError('Invalid Bluesky input action')
+                    await page.expose_binding('fanzyBlueskyInput', bluesky_input)
                 if job['platform'] == 'tiktok':
                     async def type_tiktok(source, field):
                         if source['frame'] != page.main_frame or checkpoint_requested or field not in ('title', 'description'):
@@ -260,7 +287,7 @@ class Publisher:
                     self.log('submit.success', 'TikTok 本次发布接口已确认接收提交', job)
                     return {'state':'succeeded','message':'TikTok 已确认接收作品；审核状态与可见范围请以平台为准。'}
                 if confirmation and confirmation.url:
-                    return {'state':'succeeded','message':'Pinterest 已确认创建 Pin。','url':confirmation.url}
+                    return {'state':'succeeded','message':'Bluesky 已确认发布。' if job['platform']=='bluesky' else 'Pinterest 已确认创建 Pin。','url':confirmation.url}
                 if result and result.get('state') == 'uncertain':
                     self.log('task.uncertain', '已提交，结果待确认', job, 'warn')
                     await self.capture_result(page, request, job, pending=True)
@@ -272,8 +299,8 @@ class Publisher:
                 self.log('submit.success', 'TikTok 本次发布接口已确认接收提交', job)
                 return {'state':'succeeded','message':'TikTok 已确认接收作品；审核状态与可见范围请以平台为准。'}
             if confirmation and confirmation.url:
-                self.log('submit.success','Pinterest 已返回本次创建的 Pin 链接',job)
-                return {'state':'succeeded','message':'Pinterest 已确认创建 Pin。','url':confirmation.url}
+                self.log('submit.success','平台已返回本次发布的帖子链接',job)
+                return {'state':'succeeded','message':'Bluesky 已确认发布。' if job['platform']=='bluesky' else 'Pinterest 已确认创建 Pin。','url':confirmation.url}
             message = str(error) or '发布任务超时，请检查网络、登录或平台页面'
             self.log('task.uncertain' if checkpoint_requested else 'task.failed', '已提交，结果待确认' if checkpoint_requested else message, job, 'warn' if checkpoint_requested else 'error', traceback.format_exc())
             await self.capture_result(page, request, job, pending=checkpoint_requested)

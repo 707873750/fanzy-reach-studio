@@ -2,7 +2,7 @@
 (() => {
   if (globalThis.fanzyPublisher) return;
   let current = null;
-  const hosts = {x:'x.com',instagram:'www.instagram.com',pinterest:'www.pinterest.com',tiktok:'www.tiktok.com'};
+  const hosts = {bluesky:'bsky.app',x:'x.com',instagram:'www.instagram.com',pinterest:'www.pinterest.com',tiktok:'www.tiktok.com'};
   async function trace(step,message,level='info',detail) {
     try { await globalThis.fanzyTrace({step,message,level,detail}); } catch {}
   }
@@ -132,6 +132,7 @@
   }
   function caption(job,withTitle=true) { return [withTitle?job.title:'',job.caption,job.hashtags.join(' ')].filter(Boolean).join('\n\n'); }
   function success(platform,root=document) {
+    if(platform==='bluesky') return Boolean(current?.confirmedUrl);
     if(platform==='tiktok') {
       const nodes=[...(root.nodeType===1?[root]:[]),...all('[role="status"],[role="alert"],h1,h2,h3,span,p,div',root)];
       if(nodes.some(node=>visible(node)&&/^(Your (?:post|photos) (?:has|have) been published|Post published|已发布|发布成功)[.!。！]?$/i.test(node.textContent.trim()))) return true;
@@ -165,6 +166,7 @@
     await trace('images.attached','图片已交给平台上传控件，等待平台处理');
   }
   function finalButton(platform) {
+    if(platform==='bluesky') return unique(all('[data-testid="composerPublishBtn"]',current.composer).filter(visible),'Bluesky 发布按钮');
     if(platform==='tiktok') return findButton(/^(Post|Publish|发布|發佈)$/i);
     if(platform==='x') {
       const node=unique(xAll('[data-testid="tweetButton"],[data-testid="tweetButtonInline"]').filter(visible),'X 发帖窗口内的发布按钮');
@@ -223,6 +225,10 @@
       if(current?.platform==='pinterest'&&current.submitted&&/^https:\/\/www\.pinterest\.com\/pin\/\d+\/$/.test(extra?.url||'')) current.confirmedUrl=extra.url;
       return;
     }
+    if(phase==='confirm_bluesky') {
+      if(current?.platform==='bluesky'&&current.submitted&&/^https:\/\/bsky\.app\/profile\/did:[^/]+\/post\/[A-Za-z0-9_-]+$/.test(extra?.url||'')) current.confirmedUrl=extra.url;
+      return;
+    }
     if(phase==='confirm_tiktok') {
       if(current?.platform==='tiktok'&&current.submitted) current.confirmedTikTok=true;
       return;
@@ -239,7 +245,17 @@
     }
     if(phase==='prepare') {
       if(current.prepared||current.submitted||current.files.length!==job.fileCount) throw Error('任务阶段或图片数量错误');
-      if(job.platform==='x') {
+      if(job.platform==='bluesky') {
+        const text=caption(job);
+        if([...new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(text)].length>300) throw Error('Bluesky 正文与话题合计最多 300 字符，请缩短文案');
+        current.composer=await wait(()=>unique(all('[data-testid="composePostView"]').filter(visible),'Bluesky 发帖窗口'),'Bluesky 发帖窗口');
+        const editor=await wait(()=>unique(all('[contenteditable="true"]',current.composer).filter(visible),'Bluesky 文案框'),'Bluesky 文案框');
+        await globalThis.fanzyBlueskyInput('text');
+        await wait(()=>editor.innerText.replace(/\r\n/g,'\n').trim()===text.trim(),'Bluesky 文案填写确认');
+        await globalThis.fanzyBlueskyInput('images');
+        await wait(()=>all('[data-testid="selectedPhotosView"] [data-testid="removePhotoButton"]',current.composer).filter(visible).length===job.fileCount,'Bluesky 图片数量确认');
+        if(job.altText) await globalThis.fanzyBlueskyInput('alt');
+      } else if(job.platform==='x') {
         const composer=await wait(selectXComposer,'X 发帖窗口');
         current.composer=composer.root;
         await trace('composer.selected','已锁定当前 X 发帖窗口');
@@ -433,7 +449,7 @@
         const deadline=Date.now()+45000;
         while(Date.now()<deadline) {
           if(observed||current.confirmedUrl||current.confirmedTikTok||success(job.platform)) {
-            await trace('submit.success',current.confirmedUrl?'Pinterest 已返回本次创建的 Pin 链接':current.scheduleAt?'X 已确认排程：'+current.scheduleAt:'平台发布成功确认已出现');
+            await trace('submit.success',current.confirmedUrl?'平台已返回本次发布的帖子链接':current.scheduleAt?'X 已确认排程：'+current.scheduleAt:'平台发布成功确认已出现');
             return {state:'succeeded',url:current.confirmedUrl||location.href};
           }
           await pause(250);

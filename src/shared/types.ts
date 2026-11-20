@@ -1,4 +1,4 @@
-export type Platform = "instagram" | "x" | "pinterest" | "tiktok";
+export type Platform = "instagram" | "x" | "pinterest" | "tiktok" | "bluesky";
 export interface PlatformDefaults {
   imagesPerDraft: number;
   tiktokPrivacy?: "public" | "self_only";
@@ -108,6 +108,7 @@ export interface ReachApi {
   deletePublishRecords: (recordIds: string[]) => Promise<number>;
   updateDraft: (draftId: string, patch: DraftPatch) => Promise<Draft>;
   generateCaption: (draftId: string) => Promise<Draft>;
+  generateSharedCaption: (draftIds: string[]) => Promise<Draft[]>;
   getSettings: () => Promise<SettingsView>;
   saveDeepSeekKey: (apiKey: string) => Promise<SettingsView>;
   clearDeepSeekKey: () => Promise<SettingsView>;

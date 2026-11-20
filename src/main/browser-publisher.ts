@@ -139,7 +139,7 @@ function request(payload: {platform: Platform; [key: string]: unknown}, checkpoi
 }
 
 export async function openPlatformBrowser(platform: Platform) {
-  if (!["instagram", "x", "pinterest", "tiktok"].includes(platform)) throw new Error("无效的平台");
+  if (!["instagram", "x", "pinterest", "tiktok", "bluesky"].includes(platform)) throw new Error("无效的平台");
   if (busy) throw new Error("请等待当前浏览器操作完成");
   busy = true;
   try {
@@ -150,7 +150,7 @@ export async function openPlatformBrowser(platform: Platform) {
 }
 
 export async function closePlatformBrowser(platform: Platform) {
-  if (!["instagram", "x", "pinterest", "tiktok"].includes(platform)) throw new Error("无效的平台");
+  if (!["instagram", "x", "pinterest", "tiktok", "bluesky"].includes(platform)) throw new Error("无效的平台");
   if (busy) throw new Error("请等待当前浏览器操作完成");
   busy = true;
   try {

@@ -10,6 +10,7 @@ import { readPlatformDefaults } from "../shared/platform-defaults";
 import { canDeleteDraft, canDeletePublishRecord } from "../shared/draft-lifecycle";
 
 const PLATFORM_URLS: Record<Platform, string> = {
+  bluesky: "https://bsky.app/intent/compose",
   instagram: "https://www.instagram.com/",
   x: "https://x.com/compose/post",
   pinterest: "https://www.pinterest.com/",
@@ -17,6 +18,7 @@ const PLATFORM_URLS: Record<Platform, string> = {
 };
 
 const PLATFORM_SIZES: Record<Platform, { width: number; height: number }> = {
+  bluesky: { width: 1600, height: 1600 },
   instagram: { width: 1080, height: 1350 },
   x: { width: 1600, height: 900 },
   pinterest: { width: 1000, height: 1500 },

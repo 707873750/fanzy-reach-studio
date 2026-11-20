@@ -13,7 +13,7 @@ with sync_playwright() as p, tempfile.TemporaryDirectory() as folder:
     page = browser.new_page(viewport={"width": 1440, "height": 1100})
     draft = {"id": "fixture", "platform": "x", "imageIds": [], "title": "Test", "caption": "Hello", "hashtags": [], "altText": "", "status": "draft", "scheduledAt": None, "preparedFolder": None, "publishedUrl": None, "createdAt": "2026-01-01", "updatedAt": "2026-01-01"}
     page.add_init_script("""window.browserSettings = {showBrowser:false,channel:"chrome"};
-    window.platformDefaults=Object.fromEntries(['instagram','x','pinterest','tiktok'].map(p=>[p,{imagesPerDraft:p==='tiktok'?35:p==='instagram'?10:p==='x'?4:1,hashtags:[],boardName:'',title:'',scheduleDelayMinutes:0}]));
+    window.platformDefaults=Object.fromEntries(['instagram','x','pinterest','tiktok','bluesky'].map(p=>[p,{imagesPerDraft:p==='tiktok'?35:p==='instagram'?10:(p==='x'||p==='bluesky')?4:1,hashtags:[],boardName:'',title:'',scheduleDelayMinutes:0}]));
     window.logRows = [{id:'log-1',time:'2026-11-18T12:00:00.000Z',sessionId:'test',level:'info',source:'python',step:'job.leased',message:'任务已领取',draftId:'fixture',platform:'x'},
     {id:'log-2',time:'2026-11-18T12:00:01.000Z',sessionId:'test',level:'error',source:'page',step:'control.failed',message:'测试控件错误',draftId:'fixture',platform:'x',detail:'Fixture stack trace'}];
     window.reach = {
@@ -61,6 +61,11 @@ with sync_playwright() as p, tempfile.TemporaryDirectory() as folder:
     page.wait_for_function('window.loginPlatform === "x"')
     page.get_by_role('button',name='完成 X 登录 / 关闭窗口',exact=True).click()
     page.wait_for_function('window.closedPlatform === "x"')
+    page.get_by_role('button',name='登录 Bluesky',exact=True).click()
+    page.wait_for_function('window.loginPlatform === "bluesky"')
+    page.get_by_role('button',name='完成 Bluesky 登录 / 关闭窗口',exact=True).click()
+    page.wait_for_function('window.closedPlatform === "bluesky"')
+    assert page.locator('#default-bluesky-images').input_value() == '4'
     page.get_by_label('默认图板名称',exact=True).fill('test')
     page.get_by_role('button',name='保存 Pinterest 配置',exact=True).click()
     page.wait_for_function("window.platformDefaults.pinterest.boardName === 'test'")
@@ -163,6 +168,26 @@ with sync_playwright() as p, tempfile.TemporaryDirectory() as folder:
     page.get_by_text('测试发布失败',exact=True).wait_for()
     page.wait_for_function("!document.body.innerText.includes('正在后台发布')")
     assert page.get_by_role('button',name='提交选中的 1 条',exact=True).is_enabled()
+    page.evaluate("""window.aiCalls=[];
+      window.aiDrafts=['instagram','x','tiktok'].map((platform,i)=>({...window.interactiveDrafts[0],id:'ai-'+i,platform,status:'draft',browserPublish:undefined,caption:'shared original',sharedCaption:'shared original',captionMode:'shared',updatedAt:'ai-initial'}));
+      window.reach.listDrafts=async()=>JSON.parse(JSON.stringify(window.aiDrafts));
+      window.reach.getSettings=async()=>({hasDeepSeekKey:true,model:'test'});
+      window.reach.generateCaption=async(id)=>{window.aiCalls.push(id);if(id==='ai-1')throw Error('fixture AI failure');const draft=window.aiDrafts.find(d=>d.id===id);Object.assign(draft,{caption:'Generated '+draft.platform,independentCaption:'Generated '+draft.platform,captionMode:'independent',updatedAt:'ai-done'});return {...draft};};void 0;""")
+    page.get_by_role('button',name='刷新',exact=True).click()
+    page.get_by_label('选择 Instagram 草稿 ai-0',exact=True).wait_for()
+    page.get_by_role('button',name='选择可发布草稿（最多 100 条）',exact=True).click()
+    page.get_by_role('button',name='AI 批量生成独立文案',exact=True).click()
+    page.get_by_text('AI 独立文案已生成 2/3 条。',exact=False).wait_for()
+    assert page.evaluate('window.aiCalls') == ['ai-0','ai-1','ai-2']
+    assert page.evaluate('window.aiDrafts[1].caption') == 'shared original'
+    assert page.evaluate('window.aiDrafts[2].captionMode') == 'independent'
+    page.locator('.draft-row').filter(has_text='TikTok').click()
+    page.wait_for_function("document.getElementById('draft-caption').value === 'Generated tiktok'")
+    page.evaluate("""window.reach.generateSharedCaption=async(ids)=>{window.sharedAiIds=ids;return window.aiDrafts.map(d=>Object.assign(d,{caption:'Unified AI',captionMode:'shared',sharedCaption:'Unified AI',copyGroupId:'unified',updatedAt:'shared-ai-done'}));};void 0;""")
+    page.get_by_role('button',name='AI 生成统一文案',exact=True).click()
+    page.get_by_text('已为 3 条草稿生成统一正文',exact=False).wait_for()
+    assert page.evaluate('window.sharedAiIds') == ['ai-0','ai-1','ai-2']
+    page.wait_for_function("document.getElementById('draft-caption').value === 'Unified AI'")
     assert not errors, errors
     browser.close()
     server.shutdown()
