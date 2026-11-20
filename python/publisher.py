@@ -80,7 +80,7 @@ class Publisher:
             return context
         except Exception as error:
             await context.close()
-            raise RuntimeError('登录状态恢复失败，请使用保存配置的同一个 Windows 用户运行程序') from error
+            raise RuntimeError('登录状态恢复失败，请使用保存配置的同一个系统用户运行程序，并允许访问系统密钥存储') from error
 
     async def save_session(self, context, request):
         state = await asyncio.wait_for(context.storage_state(indexed_db=True), timeout=10)
@@ -454,7 +454,10 @@ async def main():
                     break
                 try:
                     action = request.get('action')
-                    if action == 'login':
+                    if action == 'configure_session':
+                        session_store.configure_key(request['key'])
+                        continue
+                    elif action == 'login':
                         result = await publisher.login(request)
                     elif action == 'close_login':
                         result = await publisher.close_login(request)
@@ -489,5 +492,25 @@ async def main():
             await publisher.close()
 
 
+async def self_test():
+    """Local packaging check: no accounts, profiles, or network publishing."""
+    from playwright.async_api import async_playwright
+    if sys.platform == 'darwin':
+        import os
+        session_store.configure_key(base64.b64encode(os.urandom(32)).decode('ascii'))
+    payload = b'packaging-check'
+    assert session_store.crypt(session_store.crypt(payload), decrypt=True) == payload
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(channel='chrome', headless=True)
+        try:
+            page = await browser.new_page()
+            await page.set_content('<title>Fanzy packaging check</title>')
+            assert await page.title() == 'Fanzy packaging check'
+            await page.evaluate('(source) => { new Function(source); }', ADAPTER_PATH.read_text(encoding='utf-8'))
+        finally:
+            await browser.close()
+    emit({'type': 'self-test', 'ok': True, 'frozen': bool(getattr(sys, 'frozen', False))})
+
+
 if __name__ == '__main__':
-    asyncio.run(main())
+    asyncio.run(self_test() if '--self-test' in sys.argv else main())

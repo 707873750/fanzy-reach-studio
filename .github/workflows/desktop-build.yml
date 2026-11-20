@@ -1,0 +1,109 @@
+name: Desktop installers
+on:
+  workflow_dispatch:
+    inputs:
+      signed:
+        description: 'Require signing (and macOS notarization); configure repository secrets first'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            platform: win
+            arch: x64
+          - runner: macos-15
+            platform: mac
+            arch: arm64
+          - runner: macos-15-intel
+            platform: mac
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          architecture: ${{ matrix.arch }}
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: ${{ matrix.arch }}
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m pip install -r python/requirements-build.txt
+          echo "FANZY_PYTHON=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
+      - name: Check source
+        run: |
+          npm run typecheck
+          node tests/parallel-publisher.test.mjs
+          node tests/publisher-runtime.test.mjs
+          python -m unittest discover -s python -p test_desktop_platform.py -v
+          python -m unittest discover -s python -p test_publisher.py -v
+      - name: Build bundled publisher and UI
+        run: |
+          npm run build:publisher
+          npm run build
+      - name: Verify bundled publisher with system Chrome
+        run: node scripts/smoke-publisher.mjs
+      - name: Verify native Chrome profile handoff
+        run: python -m unittest discover -s python -p test_native_login.py -v
+      - name: Verify publishing with intercepted local fixtures
+        run: python -m unittest discover -s python -p test_playwright.py -v
+      - name: Package test build (not for public distribution)
+        if: ${{ !inputs.signed }}
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          if [ '${{ matrix.platform }}' = mac ]; then
+            npx electron-builder --mac --${{ matrix.arch }} --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false -c.mac.notarize=false
+          else
+            npx electron-builder --win --x64 --publish never
+          fi
+      - name: Package signed Windows installer
+        if: ${{ inputs.signed && matrix.platform == 'win' }}
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: npx electron-builder --win --x64 --publish never -c.forceCodeSigning=true
+      - name: Package signed and notarized Mac installer
+        if: ${{ inputs.signed && matrix.platform == 'mac' }}
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx electron-builder --mac --${{ matrix.arch }} --publish never -c.forceCodeSigning=true -c.mac.notarize=true
+      - name: Verify final packaged publisher
+        shell: bash
+        run: |
+          if [ '${{ matrix.platform }}' = mac ]; then
+            suffix=''
+            if [ '${{ matrix.arch }}' = arm64 ]; then suffix='-arm64'; fi
+            node scripts/smoke-publisher.mjs "release/mac${suffix}/Fanzy Reach Studio.app/Contents/Resources/publisher/fanzy-publisher"
+            python python/smoke_packaged_app.py "release/mac${suffix}/Fanzy Reach Studio.app/Contents/MacOS/Fanzy Reach Studio"
+          else
+            node scripts/smoke-publisher.mjs release/win-unpacked/resources/publisher/fanzy-publisher.exe
+            python python/smoke_packaged_app.py "release/win-unpacked/Fanzy Reach Studio.exe"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Fanzy-${{ matrix.platform }}-${{ matrix.arch }}
+          if-no-files-found: error
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap

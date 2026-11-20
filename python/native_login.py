@@ -5,9 +5,17 @@ from ctypes import wintypes
 import os
 from pathlib import Path
 import subprocess
+import sys
+import signal
 
 
 def chrome_executable():
+    if sys.platform == 'darwin':
+        for root in (Path('/Applications'), Path.home() / 'Applications'):
+            path = root / 'Google Chrome.app/Contents/MacOS/Google Chrome'
+            if path.is_file():
+                return str(path)
+        raise RuntimeError('未找到 Google Chrome，请将 Chrome 安装到 Applications 后再登录')
     for root in ('PROGRAMFILES', 'PROGRAMFILES(X86)', 'LOCALAPPDATA'):
         path = Path(os.environ.get(root, '')) / 'Google/Chrome/Application/chrome.exe'
         if path.is_file():
@@ -51,7 +59,12 @@ class NativeChrome:
     async def close(self):
         if self.process.poll() is not None:
             return
-        close_windows(self.process.pid)
+        if sys.platform == 'darwin':
+            # Signal only our dedicated Chrome process. Chromium handles SIGTERM
+            # with normal shutdown; never quit all of the user's Chrome windows.
+            self.process.send_signal(signal.SIGTERM)
+        else:
+            close_windows(self.process.pid)
         try:
             await asyncio.to_thread(self.process.wait, timeout=15)
         except subprocess.TimeoutExpired as error:

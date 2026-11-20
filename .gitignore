@@ -12,3 +12,4 @@ Thumbs.db
 .python-runtime/
 __pycache__/
 browser-profiles/
+build/

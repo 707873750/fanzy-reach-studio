@@ -2,6 +2,9 @@
 import tempfile
 import asyncio
 import unittest
+import base64
+import os
+import sys
 from unittest.mock import AsyncMock, patch
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -13,6 +16,10 @@ from smoke_extension import FIXTURE, INSTAGRAM, PINTEREST
 
 class PlaywrightPublishingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        if sys.platform == 'darwin':
+            # The real desktop supplies a Keychain-protected key via stdin.
+            # Fixtures use an ephemeral key and never access the user's Keychain.
+            session_store.configure_key(base64.b64encode(os.urandom(32)).decode('ascii'))
         self.temp = tempfile.TemporaryDirectory()
         self.playwright = await async_playwright().start()
         self.events = []
@@ -54,6 +61,8 @@ class PlaywrightPublishingTests(unittest.IsolatedAsyncioTestCase):
         await self.runner.close()
         await self.playwright.stop()
         self.temp.cleanup()
+        if sys.platform == 'darwin':
+            session_store._session_key = None
 
     async def checkpoint(self):
         page = self.context.pages[0]

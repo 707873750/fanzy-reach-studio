@@ -2,7 +2,6 @@ import { app, BrowserWindow } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import fs from "node:fs/promises";
-import { existsSync } from "node:fs";
 import path from "node:path";
 import { findDraft, getAppPaths, getStore, persistStore, updateDraftRecord } from "./store";
 import { prepareDraft } from "./draft-service";
@@ -10,6 +9,7 @@ import type { BrowserSettings, Draft, Platform } from "../shared/types";
 
 import { log, errorDetail } from "./run-logger";
 import { setPerformancePublishing } from "./performance-monitor";
+import { publisherCommand, macSessionKey } from "./publisher-runtime";
 
 type Result = { state: "opened" | "succeeded" | "needs_attention" | "uncertain" | "local_scheduled"; message?: string; url?: string };
 let busy = false;
@@ -50,10 +50,9 @@ function createPlatformClient() {
   let pending: { resolve: (r: Result) => void; reject: (e: Error) => void; checkpoint: () => Promise<void> } | undefined;
   function getWorker() {
     if (worker) return worker;
-    const base = app.isPackaged ? process.resourcesPath : app.getAppPath();
-    const localPython = path.join(base, ".venv", "Scripts", "python.exe");
-    const configured = process.env.FANZY_PYTHON || (existsSync(localPython) ? localPython : undefined);
-    const child = spawn(configured || "py", [...(configured ? [] : ["-3"]), "-u", path.join(base, "python", "publisher.py")], {
+    const { command, args } = publisherCommand();
+    const sessionKey = macSessionKey();
+    const child = spawn(command, args, {
       windowsHide: true, stdio: "pipe", env: { ...process.env, PYTHONIOENCODING: "utf-8" }
     });
     worker = child;
@@ -61,7 +60,7 @@ function createPlatformClient() {
     const fail = () => {
       if (worker !== child) return;
       worker = undefined;
-      pending?.reject(new Error("Python 发布进程已停止，请检查 Python 3.10 及以上版本和 Playwright 安装，必要时通过 FANZY_PYTHON 设置解释器路径。"));
+      pending?.reject(new Error(app.isPackaged ? "内置发布组件已停止，请查看运行日志，必要时重新安装完整版本。" : "Python 发布进程已停止，请检查 Python 和 Playwright 安装，必要时通过 FANZY_PYTHON 设置解释器路径。"));
       pending = undefined;
     };
     child.on("error", error => { void log({ source: "app", level: "error", step: "python.spawn_failed", message: "Python 启动失败", detail: errorDetail(error) }); fail(); });
@@ -97,6 +96,7 @@ function createPlatformClient() {
         pending?.reject(error); pending = undefined; child.kill();
       });
     });
+    if (sessionKey) child.stdin.write(JSON.stringify({ action: "configure_session", key: sessionKey }) + "\n");
     return child;
   }
 

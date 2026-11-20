@@ -1,6 +1,6 @@
 # Fanzy Reach Studio
 
-Local-first Windows desktop assistant for preparing image posts for Instagram, X, Pinterest, TikTok, Bluesky and Facebook.
+Local-first Electron desktop assistant for preparing image posts for Instagram, X, Pinterest, TikTok, Bluesky and Facebook. Windows and macOS packaging instructions: [DESKTOP-BUILD.md](DESKTOP-BUILD.md).
 
 ### Facebook 一键发布
 
@@ -33,13 +33,13 @@ Local-first Windows desktop assistant for preparing image posts for Instagram, X
 
 ### 首次使用
 
-1. 安装 Python 3.10+，运行 `python -m pip install -r python/requirements.txt`。开发模式自动使用项目 `.venv/Scripts/python.exe`，也可用 `FANZY_PYTHON` 指定解释器。
+1. 安装版已内置 Python 和 Playwright，无需另外安装。仅源码开发时需要安装 Python 并运行 `python -m pip install -r python/requirements.txt`。开发模式自动使用项目 `.venv/Scripts/python.exe`（Windows）或 `.venv/bin/python`（Mac），也可用 `FANZY_PYTHON` 指定解释器。
 2. 安装 Google Chrome，启动程序。三个平台的登录和发布统一使用 Chrome。
 3. 点击 **登录 X / Instagram / Pinterest**，程序直接启动普通 Chrome（无自动化及远程调试参数），使用各平台专用目录。完成登录与验证后点击 **完成登录 / 关闭窗口**，程序正常关闭 Chrome，再用无头 Playwright 读取同一目录并保存加密快照；此时不会恢复旧快照覆盖新会话。登录期间不定时读取快照；手动关闭窗口后仍需点击完成登录。退出程序也会尝试完成保存，失败记录在运行日志。保存成功不代表平台账号必然可发布。
 4. 默认关闭 **显示浏览器**，发布在无头模式执行。开启后发布过程可见；登录窗口始终可见。发布期间请勿手动编辑自动化窗口。
 5. 创建并保存草稿；Pinterest 填写准确的画板名。勾选草稿并点击 **Submit selected**。程序自动上传、填写并提交。X 定时草稿则提交到平台排程。
 
-登录配置按平台隔离，保存在 `browser-profiles/chrome/<平台>/`。除了浏览器原生配置，还保存 Windows DPAPI 加密的 Cookie、LocalStorage 和 IndexedDB 快照，避免浏览器关闭后丢失会话。快照只能由同一 Windows 用户解密；不要分享整个配置目录。已有 Chrome 配置继续复用，旧 Edge / Chromium 配置保留但不再用于发布，需在普通 Chrome 中重新登录。旧扩展可停用，生产发布不再使用它。
+登录配置按平台隔离，保存在 `browser-profiles/chrome/<平台>/`。Cookie、LocalStorage 和 IndexedDB 快照在 Windows 上继续使用 DPAPI 加密；Mac 使用 AES-GCM，并通过 Electron safeStorage / 系统钥匙串保护加密密钥。密钥通过标准输入传给发布进程，不写入命令行或环境变量。不要分享整个配置目录，也不要跨系统复制登录快照。Mac 需要通过桌面应用启动发布程序。已有 Windows Chrome 配置继续复用；旧 Edge / Chromium 配置保留但不再用于发布。
 
 ### 结果与恢复
 
@@ -83,12 +83,12 @@ npm run build
 
 This starter pins Electron to `^41.0.0` because electron-vite 5.0.0 locates the Electron executable through `node_modules/electron/path.txt`. Electron 42+ changed its binary download behavior, so do not upgrade Electron to 42+ with this electron-vite setup unless you also upgrade to an electron-vite release that explicitly supports the new mechanism.
 
-## Requirements
+## Development requirements
 
-- Windows 10/11 x64
+- Windows 10/11 x64 or macOS (build separately for Apple Silicon / Intel)
 - Node.js 22 LTS or a compatible newer LTS release
 - npm
-- Python 3.10+, Playwright and Google Chrome
+- Python 3.12 recommended, Playwright and Google Chrome
 - Internet connection for DeepSeek AI requests and platform publishing
 
 ## Install and run
@@ -99,7 +99,15 @@ npm run typecheck
 npm run dev
 ```
 
-## Build Windows installer
+## Build desktop installers
+
+First install the build dependencies into the Python environment used by the project:
+
+```text
+python -m pip install -r python/requirements-build.txt
+```
+
+Windows:
 
 ```powershell
 npm run dist:win
@@ -108,7 +116,7 @@ npm run dist:win
 Output:
 
 ```text
-release/Fanzy-Reach-Studio-0.1.0-x64.exe
+release/Fanzy-Reach-Studio-0.2.0-win-x64.exe
 ```
 
 For an unpacked build:
@@ -117,7 +125,7 @@ For an unpacked build:
 npm run pack:win
 ```
 
-Build on Windows for the most predictable Windows installer. Sharp is a native Node addon; electron-builder rebuilds production dependencies for Electron during packaging.
+On macOS, use `npm run dist:mac` on each target architecture. Installers include the Python publisher and Playwright; users still need Google Chrome. See [DESKTOP-BUILD.md](DESKTOP-BUILD.md) for isolated builds, CI, signing, notarization and verification. Sharp is rebuilt for the target platform during packaging.
 
 ## DeepSeek setup
 
@@ -163,7 +171,7 @@ Use the app's own UI to manage data. Do not manually edit `reach-data.json` whil
 - Pinterest creates one Pin draft per image.
 - Browser success requires a platform confirmation message; manual publication remains user-confirmed. Post URLs are recorded only when a verified detail URL is available.
 - AI output must be reviewed before posting.
-- The installer has not been tested on a clean Windows machine; Python and the selected browser must be provisioned separately.
+- Full clean-machine installation and macOS real-machine acceptance remain required. Python and Playwright are bundled; Google Chrome must be installed separately.
 
 ## Security notes
 
@@ -171,8 +179,8 @@ Use the app's own UI to manage data. Do not manually edit `reach-data.json` whil
 - Context isolation and sandboxing are enabled.
 - The preload exposes a narrow, typed API.
 - Only HTTPS external links are opened.
-- DeepSeek API keys are encrypted with Electron `safeStorage` on Windows.
-- Login snapshots are encrypted with Windows DPAPI; browser profiles and diagnostic screenshots stay local.
+- DeepSeek API keys are encrypted with Electron `safeStorage`.
+- Login snapshots use Windows DPAPI or macOS AES-GCM with a safeStorage-protected key; browser profiles and diagnostic screenshots stay local.
 - This local app does not provide a secure multi-user secret vault. Windows DPAPI protects the stored key for the current Windows user, but malware running as that user may still access application secrets.
 
 ## Suggested next steps

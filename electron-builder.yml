@@ -1,6 +1,7 @@
 appId: com.ifanzy.reachstudio
 productName: Fanzy Reach Studio
-artifactName: Fanzy-Reach-Studio-${version}-${arch}.${ext}
+artifactName: Fanzy-Reach-Studio-${version}-${os}-${arch}.${ext}
+beforePack: scripts/before-pack.cjs
 directories:
   output: release
 files:
@@ -8,12 +9,8 @@ files:
   - package.json
 asar: true
 extraResources:
-  - from: python
-    to: python
-    filter:
-      - "*.py"
-      - "*.js"
-      - "requirements.txt"
+  - from: build/publisher/${platform}-${arch}/fanzy-publisher
+    to: publisher
 asarUnpack:
   - "**/node_modules/sharp/**/*"
   - "**/node_modules/@img/**/*"
@@ -32,3 +29,11 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: Fanzy Reach Studio
   deleteAppDataOnUninstall: false
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+    - zip
+  hardenedRuntime: true
+  entitlements: build-resources/entitlements.mac.plist
+  entitlementsInherit: build-resources/entitlements.mac.plist

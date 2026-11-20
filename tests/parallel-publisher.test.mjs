@@ -53,6 +53,7 @@ const dependencies={
   'node:child_process':{spawn},'node:readline':{createInterface},
   'node:fs/promises':{readdir:async()=>['01-photo.jpg']},'node:fs':{existsSync:()=>true},'node:path':path,
   './store':store,'./draft-service':{prepareDraft:async id=>({folder:'/fixture/'+id})},
+  './publisher-runtime':{publisherCommand:()=>({command:'fixture-python',args:[]}),macSessionKey:()=>undefined},
   './run-logger':{log:async e=>events.push(e),errorDetail:String},
   './performance-monitor':{setPerformancePublishing:()=>{}}
 };
