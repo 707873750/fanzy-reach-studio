@@ -1,13 +1,15 @@
+import { t, useLanguage } from "./i18n";
+import { formatDate } from "./i18n";
 import { memo, useEffect, useMemo, useState } from "react";
 import { Copy, FolderOpen, RefreshCw } from "lucide-react";
 import type { RunLog } from "../../shared/types";
 
-const logTime = new Intl.DateTimeFormat("zh-CN", {dateStyle:"short", timeStyle:"medium", hour12:false});
 const LogRow = memo(function LogRow({entry}: {entry: RunLog}) {
+  useLanguage();
   return <article className={`log-row log-${entry.level}`}>
-    <div className="log-meta"><time dateTime={entry.time}>{logTime.format(new Date(entry.time))}</time><strong>{{info:"信息",warn:"警告",error:"错误"}[entry.level]}</strong><span>{{app:"程序",python:"Python 后端",extension:"浏览器扩展",page:"平台页面"}[entry.source]}</span>{entry.platform && <span>{{instagram:"Instagram",x:"X",pinterest:"Pinterest",tiktok:"TikTok",bluesky:"Bluesky",facebook:"Facebook"}[entry.platform]}</span>}<code>{entry.step}</code></div>
+    <div className="log-meta"><time dateTime={entry.time}>{formatDate(entry.time)}</time><strong>{{info:t("信息"),warn:t("警告"),error:t("错误")}[entry.level]}</strong><span>{{app:t("程序"),python:t("Python 后端"),extension:t("浏览器扩展"),page:t("平台页面")}[entry.source]}</span>{entry.platform && <span>{{instagram:"Instagram",x:"X",pinterest:"Pinterest",tiktok:"TikTok",bluesky:"Bluesky",facebook:"Facebook"}[entry.platform]}</span>}<code>{entry.step}</code></div>
     <div className="log-message">{entry.message}</div>
-    <details><summary>详情{entry.draftId ? ` · 草稿 ${entry.draftId.slice(0, 8)}` : ""}</summary><pre>{[entry.draftId && `草稿：${entry.draftId}`, entry.jobId && `执行：${entry.jobId}`, `会话：${entry.sessionId}`, entry.detail].filter(Boolean).join("\n")}</pre></details>
+    <details><summary>{t("详情{0}", [entry.draftId ? t(" · 草稿 {0}", [entry.draftId.slice(0, 8)]) : ""])}</summary><pre>{[entry.draftId && t("草稿：{0}", [entry.draftId]), entry.jobId && t("执行：{0}", [entry.jobId]), t("会话：{0}", [entry.sessionId]), entry.detail].filter(Boolean).join("\n")}</pre></details>
   </article>;
 });
 
@@ -16,6 +18,7 @@ function mergeLogs(first: RunLog[], second: RunLog[]) {
 }
 
 export default function RunLogs({ draftId = "" }: { draftId?: string }) {
+  useLanguage();
   const [entries, setEntries] = useState<RunLog[]>([]);
   const [directory, setDirectory] = useState("");
   const [storageError, setStorageError] = useState<string | null>(null);
@@ -33,7 +36,7 @@ export default function RunLogs({ draftId = "" }: { draftId?: string }) {
       setEntries(old => mergeLogs(snapshot.entries, old));
       setDirectory(snapshot.directory);
       setStorageError(snapshot.storageError);
-    } catch (error) { setNotice(error instanceof Error ? error.message : "读取日志失败"); }
+    } catch (error) { setNotice(error instanceof Error ? error.message : t("读取日志失败")); }
     finally { setLoading(false); }
   }
   useEffect(() => {
@@ -70,30 +73,30 @@ export default function RunLogs({ draftId = "" }: { draftId?: string }) {
   const currentPage=Math.min(pageIndex,pageCount-1);
   const visibleEntries=[...filtered].reverse().slice(currentPage*100,(currentPage+1)*100);
   async function action(task: () => Promise<unknown>, success: string) {
-    try { await task(); setNotice(success); } catch (error) { setNotice(error instanceof Error ? error.message : "操作失败"); }
+    try { await task(); setNotice(success); } catch (error) { setNotice(error instanceof Error ? error.message : t("操作失败")); }
   }
   return <>
-    <section className="page-heading"><div><div className="eyebrow">问题排查</div><h1>运行日志</h1><p>最近 1000 条可搜索，每页显示 100 条，新日志每 250 毫秒合并刷新；完整记录保存在日志文件中。</p></div></section>
+    <section className="page-heading"><div><div className="eyebrow">{t("问题排查")}</div><h1>{t("运行日志")}</h1><p>{t("最近 1000 条可搜索，每页显示 100 条，新日志每 250 毫秒合并刷新；完整记录保存在日志文件中。")}</p></div></section>
     <section className="panel">
       <div className="heading-actions">
-        <button className="button secondary" disabled={loading} onClick={() => void refresh()}><RefreshCw size={16}/> 刷新日志</button>
-        <button className="button secondary" onClick={() => void action(() => window.reach.openLogFolder(), "日志文件夹已打开")}><FolderOpen size={16}/> 打开日志文件夹</button>
-        <button className="button secondary" disabled={!filtered.length} onClick={() => void action(() => window.reach.copyText(filtered.map(entry => JSON.stringify(entry)).join("\n")), "已复制筛选后的日志（剪贴板最多 10000 字符，完整记录请打开日志文件夹）")}><Copy size={16}/> 复制筛选结果</button>
+        <button className="button secondary" disabled={loading} onClick={() => void refresh()}><RefreshCw size={16}/> {t("刷新日志")}</button>
+        <button className="button secondary" onClick={() => void action(() => window.reach.openLogFolder(), t("日志文件夹已打开"))}><FolderOpen size={16}/> {t("打开日志文件夹")}</button>
+        <button className="button secondary" disabled={!filtered.length} onClick={() => void action(() => window.reach.copyText(filtered.map(entry => JSON.stringify(entry)).join("\n")), t("已复制筛选后的日志（剪贴板最多 10000 字符，完整记录请打开日志文件夹）"))}><Copy size={16}/> {t("复制筛选结果")}</button>
       </div>
-      <p className="muted log-path">{directory || "正在读取日志目录…"}</p>
-      <p className="muted">单个日志文件约 5 MB，最多保留 10 个历史文件。失败截图位于 screenshots 子目录，最多 50 张，可能包含账号和草稿内容。</p>
+      <p className="muted log-path">{directory || t("正在读取日志目录…")}</p>
+      <p className="muted">{t("单个日志文件约 5 MB，最多保留 10 个历史文件。失败截图位于 screenshots 子目录，最多 50 张，可能包含账号和草稿内容。")}</p>
       {notice && <div className="notice" role="status">{notice}</div>}
-      {storageError && <div className="notice log-storage-error" role="alert">日志文件保存失败，当前记录仅在内存中：{storageError}</div>}
+      {storageError && <div className="notice log-storage-error" role="alert">{t("日志文件保存失败，当前记录仅在内存中：{0}", [storageError])}</div>}
       <div className="log-filters">
-        <div className="field"><label htmlFor="log-level">级别</label><select id="log-level" value={level} onChange={e => setLevel(e.target.value)}><option value="all">全部级别</option><option value="info">信息</option><option value="warn">警告</option><option value="error">错误</option></select></div>
-        <div className="field"><label htmlFor="log-platform">平台</label><select id="log-platform" value={platform} onChange={e => setPlatform(e.target.value)}><option value="all">全部平台</option><option value="x">X</option><option value="instagram">Instagram</option><option value="pinterest">Pinterest</option><option value="tiktok">TikTok</option><option value="facebook">Facebook</option><option value="bluesky">Bluesky</option></select></div>
-        <div className="field log-search"><label htmlFor="log-search">搜索步骤、错误或任务 ID</label><input id="log-search" value={search} onChange={e => setSearch(e.target.value)} placeholder="例如 images.upload、任务 ID、未连接"/></div>
+        <div className="field"><label htmlFor="log-level">{t("级别")}</label><select id="log-level" value={level} onChange={e => setLevel(e.target.value)}><option value="all">{t("全部级别")}</option><option value="info">{t("信息")}</option><option value="warn">{t("警告")}</option><option value="error">{t("错误")}</option></select></div>
+        <div className="field"><label htmlFor="log-platform">{t("平台")}</label><select id="log-platform" value={platform} onChange={e => setPlatform(e.target.value)}><option value="all">{t("全部平台")}</option><option value="x">X</option><option value="instagram">Instagram</option><option value="pinterest">Pinterest</option><option value="tiktok">TikTok</option><option value="facebook">Facebook</option><option value="bluesky">Bluesky</option></select></div>
+        <div className="field log-search"><label htmlFor="log-search">{t("搜索步骤、错误或任务 ID")}</label><input id="log-search" value={search} onChange={e => setSearch(e.target.value)} placeholder={t("例如 images.upload、任务 ID、未连接")}/></div>
       </div>
-      <p className="muted">当前匹配 {filtered.length} 条 · 时间使用本机时区 · 点击记录下方的详情查看错误堆栈和任务标识</p>
-      <div className="heading-actions"><button className="button secondary" disabled={currentPage===0} onClick={()=>setPageIndex(currentPage-1)}>较新记录</button><span className="muted">第 {currentPage+1} / {pageCount} 页</span><button className="button secondary" disabled={currentPage+1>=pageCount} onClick={()=>setPageIndex(currentPage+1)}>较早记录</button></div>
-      <p className="muted">性能采样单独保存在日志文件夹的 performance 子目录，不在此列表刷屏。点击“打开日志文件夹”后进入该目录查看。窗口无响应、GPU 退出等异常仍显示在运行日志中。</p>
-      <div className="log-list" aria-label="运行日志列表">
-        {!filtered.length && <div className="empty-mini">{loading ? "正在读取…" : "没有匹配的日志。新操作产生的日志会自动出现。"}</div>}
+      <p className="muted">{t("当前匹配 {0} 条 · 时间使用本机时区 · 点击记录下方的详情查看错误堆栈和任务标识", [filtered.length])}</p>
+      <div className="heading-actions"><button className="button secondary" disabled={currentPage===0} onClick={()=>setPageIndex(currentPage-1)}>{t("较新记录")}</button><span className="muted">{t("第 {0} / {1} 页", [currentPage+1, pageCount])}</span><button className="button secondary" disabled={currentPage+1>=pageCount} onClick={()=>setPageIndex(currentPage+1)}>{t("较早记录")}</button></div>
+      <p className="muted">{t("性能采样单独保存在日志文件夹的 performance 子目录，不在此列表刷屏。点击“打开日志文件夹”后进入该目录查看。窗口无响应、GPU 退出等异常仍显示在运行日志中。")}</p>
+      <div className="log-list" aria-label={t("运行日志列表")}>
+        {!filtered.length && <div className="empty-mini">{loading ? t("正在读取…") : t("没有匹配的日志。新操作产生的日志会自动出现。")}</div>}
         {visibleEntries.map(entry => <LogRow key={entry.id} entry={entry}/>)}
       </div>
     </section>
