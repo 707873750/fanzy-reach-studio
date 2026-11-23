@@ -1,0 +1,10 @@
+[project]
+name = "fanzy-backend"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = ["fastapi>=0.115,<1"]
+
+[dependency-groups]
+local = ["uvicorn>=0.34,<1", "httpx>=0.28,<1", "python-dotenv>=1,<2"]
+test = ["httpx>=0.28,<1"]
+dev = ["workers-py", "workers-runtime-sdk", "uv>=0.13.4,<1"]

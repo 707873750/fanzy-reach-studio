@@ -11,7 +11,7 @@ if (process.type === 'renderer') {
   window.reach = {
     listImages:async()=>structuredClone(fixture.images), listDrafts:async()=>structuredClone(fixture.drafts),
     deleteImage:async id=>{if(id==='blocked' && fixture.imageBlocked) throw Error('图片正被草稿使用');fixture.deletedImages.push(id);fixture.images=fixture.images.filter(image=>image.id!==id);},
-    getSettings:async()=>({hasDeepSeekKey:false,model:'deepseek-flash'}),
+    getSettings:async()=>({backendLoggedIn:false}),
     getBrowserSettings:async()=>({showBrowser:false,channel:'chrome'}),
     onScheduleReminder:()=>()=>{}, onPublishProgress:fn=>{fixture.progress=fn;return()=>{};},
     getPublishBatch:async()=>[], onPublishBatch:fn=>{fixture.batch=fn;return()=>{};},

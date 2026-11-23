@@ -2,19 +2,19 @@
 
 Local-first Electron desktop assistant for preparing image posts for Instagram, X, Pinterest, TikTok, Bluesky and Facebook. Windows and macOS packaging instructions: [DESKTOP-BUILD.md](DESKTOP-BUILD.md).
 
-### 火山引擎文生图与图片编辑
+### 桌面端登录、签到与积分生图 Demo
 
-在火山引擎控制台开通视觉智能服务中的通用 3.0 文生图与 SeedEdit 3.0，并获取有相应权限的 Access Key ID / Secret Access Key。在应用「设置 → 火山引擎图片生成与编辑」保存 AK/SK；这里使用视觉智能的访问密钥，不使用方舟 API Key。凭据由系统安全存储加密，主进程负责签名与调用，不回传密钥给界面。
+运行 `npm run demo:server` 启动独立后端，再运行 `npm run dev` 启动桌面端。在「素材库 → AI 生成图片」或「设置 → 生图账户」点击「没有账号？注册」，使用用户名和密码注册后自动登录。用户名为 3–32 位字母、数字或下划线，密码为 8–128 位。每个账号独立保存积分和签到记录，新账号为 0 积分，签到默认领取 30 积分。本地兼容账号 `demo`，默认密码 `demo12345`。后端地址由应用内部管理，不在用户界面中输入或展示。
 
-- 「素材库 → AI 生成图片 → 通用 3.0 文生图」：输入描述并选择尺寸，点击「生成图片」查看预览；满意后点击「保存到素材库」，或点击「丢弃结果」。生成本身不写入素材库。
-- 「SeedEdit 3.0 图片编辑」：点击「上传本地图片」选择 JPEG/PNG，或从素材库选择底图，输入编辑指令并设置强度。本地上传不导入素材库，选择文件仅在本机读取和预览，点击生成时才发送底图和指令至火山引擎。底图最大 5 MB，宽高均不超过 4096，长短边比例不超过 3。结果先预览再手动保存，原图保留。
-- 每次一张，火山任务串行执行。任务编号保存在本地，查询失败或重启后可在工作台点击「继续查询」，不会重新提交生成请求。放弃任务记录不会取消云端任务，也不会撤销计费。提交响应丢失时没有可恢复的任务编号，应先在控制台核对调用记录。
-- 生成后以 Base64 获取图片并在内存中保留预览，输出上限 20 MB。点击保存才写入素材库；保存失败保留预览，可直接重试保存。收起面板或切换页面后仍可恢复预览，退出应用后需通过「继续查询」恢复云端结果（受云端任务有效期限制）。图片编辑也先预览再保存。保留服务默认生成标识配置。应用不保证免费额度，也不自动重试生成请求；体验额度和后续收费以控制台为准。
-- 已移除智谱生图集成；首次启动新版时移除旧智谱加密密钥字段，已有图片保留。DeepSeek 文案功能不受影响。
+在项目根目录 `.env` 中设置 `MAIN_VITE_BACKEND_URL=https://你的后端地址`，开发时重启 `npm run dev` 生效，安装版需要重新打包。连接云端无需运行本地后端，使用云端账号密码。系统环境变量 `FANZY_BACKEND_URL` 可覆盖 `.env` 地址；已有登录会话仍使用登录时保存的地址，切换后需退出并重新登录。
 
-接入的是[通用 3.0 文生图异步接口](https://docs.volcengine.com/docs/large-model-of-image-generation/universal-30-text-to-image-1?lang=zh)（`high_aes_general_v30l_zt2i`）和 [SeedEdit 3.0](https://docs.volcengine.com/docs/large-model-of-image-generation/graphics30-instruction-editing-seededit30?lang=zh)（`seededit_v3.0`），采用 `CVSync2AsyncSubmitTask` / `CVSync2AsyncGetResult`、版本 `2022-08-31`，签名地域 `cn-north-1`、服务 `cv`。
+- 未登录无法生图，桌面 IPC 和后端 API 都校验登录，不回退到本机密钥直连。
+- 每日签到默认领取 30 积分，每张图默认消耗 10 积分；权限、费用与余额由后端控制并持久化。
+- 后端真实调用火山视觉智能「通用 3.0 文生图」。本机演示可复用已保存的加密 AK/SK，或在 `backend/.dev.vars` 配置服务器密钥；云端使用 Workers Secrets。
+- 结果先预览，再点击「保存到素材库」。查询失败可继续查询，不重复扣分或提交生成。明确失败退回积分，受理结果不明则保留记录待核对。
+- 当前 demo 仅开放文生图；原有 SeedEdit 实现保留在源码中，未接入此积分 demo。图片理解和文案生成也通过后端调用，共用登录账户，当前不扣应用积分。
 
-验证：`node tests/image-generation.test.mjs`、`npm run typecheck`、`npm run build`。测试使用模拟响应，不提交真实云端任务。开发版运行 `npm run dev`；安装版需重新打包。
+详细配置、限制与 Workers + D1 部署步骤见 [backend/README.md](backend/README.md)。验证命令为 `npm run test:backend`、`npm run typecheck`、`npm run build`。安装版需要重新打包。
 
 ### Facebook 一键发布
 
@@ -39,7 +39,7 @@ Local-first Electron desktop assistant for preparing image posts for Instagram, 
 - Prepare platform-sized JPEGs, write `caption.txt`, copy the caption and open the official platform website.
 - Start a native Windows file drag from a prepared draft card so the user can drag the files into a compatible platform composer.
 - Manually confirm publication and optionally store the published URL.
-- Store images, drafts and settings locally. The DeepSeek API key is encrypted with Electron `safeStorage`.
+- Store images, drafts and settings locally. DeepSeek credentials are configured only on the server; the desktop stores its login token using Electron `safeStorage`.
 
 ## Python + Playwright 无头发布
 
@@ -143,13 +143,11 @@ On macOS, use `npm run dist:mac` on each target architecture. Installers include
 
 ## DeepSeek setup
 
-1. Open Settings in the app.
-2. Paste your DeepSeek API key.
-3. Click Save API key.
-4. Return to Publishing Queue and choose a draft.
-5. Click Generate with AI.
+1. Configure `DEEPSEEK_API_KEY` in `backend/.dev.vars` locally, or as a Worker Secret in production. Optionally set `DEEPSEEK_MODEL` (default: `deepseek-flash`). Restart or deploy the backend after configuration.
+2. Sign in to the backend account in the app's Settings.
+3. Return to Publishing Queue, choose drafts and generate independent or shared AI copy.
 
-The app sends selected, resized images to DeepSeek. The originals remain in the local app data directory. AI requests are external network requests and may incur provider charges.
+The app sends selected, resized JPEG images (or video cover frames) to the authenticated `/api/captions` endpoint. The server builds the prompt and calls DeepSeek without storing images or drafts. Originals remain local. Existing desktop DeepSeek keys are no longer read or sent; configure the key on the server. Caption generation currently does not deduct app credits, but provider charges still apply to the server account.
 
 DeepSeek vision documentation:
 https://api-docs.deepseek.com/guides/vision/
@@ -193,7 +191,7 @@ Use the app's own UI to manage data. Do not manually edit `reach-data.json` whil
 - Context isolation and sandboxing are enabled.
 - The preload exposes a narrow, typed API.
 - Only HTTPS external links are opened.
-- DeepSeek API keys are encrypted with Electron `safeStorage`.
+- DeepSeek API keys stay on the backend; desktop login tokens are encrypted with Electron `safeStorage`.
 - Login snapshots use Windows DPAPI or macOS AES-GCM with a safeStorage-protected key; browser profiles and diagnostic screenshots stay local.
 - This local app does not provide a secure multi-user secret vault. Windows DPAPI protects the stored key for the current Windows user, but malware running as that user may still access application secrets.
 

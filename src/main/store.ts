@@ -14,11 +14,16 @@ export interface StoreData {
   images: StoredImage[];
   drafts: StoredDraft[];
   settings: {
+    backendUrl?: string;
+    backendTokenEncrypted?: string;
+    backendUserId?: string;
+    backendPendingTask?: { id: string };
     platformDefaults?: Partial<PlatformDefaultsMap>;
+    // Legacy fields are retained in existing stores, but never read or sent.
     deepSeekKeyEncrypted?: string;
+    model?: string;
     volcKeysEncrypted?: string;
     volcPendingTask?: { id: string; reqKey: string };
-    model?: string;
     showBrowser?: boolean;
     browserChannel?: "msedge" | "chrome" | "chromium";
   };
@@ -51,17 +56,16 @@ export async function initStore() {
     const raw = await fs.readFile(storeFile, "utf8");
     data = JSON.parse(raw) as StoreData;
   } catch {
-    data = { images: [], drafts: [], settings: { model: "deepseek-flash" } };
+    data = { images: [], drafts: [], settings: {} };
     await persistStore();
   }
   data.images ??= [];
   data.drafts ??= [];
-  data.settings ??= { model: "deepseek-flash" };
+  data.settings ??= {};
   if ("zhipuKeyEncrypted" in data.settings) {
     delete data.settings.zhipuKeyEncrypted;
     await persistStore();
   }
-  data.settings.model ??= "deepseek-flash";
 }
 
 export function getStore(): StoreData {

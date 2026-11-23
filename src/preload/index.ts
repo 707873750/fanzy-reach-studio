@@ -4,6 +4,11 @@ import type { PlatformDefaults, PlatformDefaultsMap } from "../shared/types";
 import type { BrowserSettings, CopyOptions, DraftPatch, Draft, ImageAsset, ImportResult, Platform, SettingsView, RunLog, LogSnapshot } from "../shared/types";
 
 const api = {
+  backendLogin: (username: string, password: string): Promise<SettingsView> => ipcRenderer.invoke('backend:login', username, password),
+  backendRegister: (username: string, password: string): Promise<SettingsView> => ipcRenderer.invoke('backend:register', username, password),
+  backendLogout: (): Promise<SettingsView> => ipcRenderer.invoke('backend:logout'),
+  backendAccount: (): Promise<import('../shared/backend').BackendAccount> => ipcRenderer.invoke('backend:account'),
+  backendCheckin: (): Promise<import('../shared/backend').BackendAccount> => ipcRenderer.invoke('backend:checkin'),
   saveVolcKeys: (ak: string, sk: string): Promise<SettingsView> => ipcRenderer.invoke("settings:volc-save", ak, sk),
   clearVolcKeys: (): Promise<SettingsView> => ipcRenderer.invoke("settings:volc-clear"),
   pickEditImage: (): Promise<EditImageUpload | null> => ipcRenderer.invoke("images:pick-edit"),
@@ -26,7 +31,7 @@ const api = {
   getBrowserSettings: (): Promise<BrowserSettings> => ipcRenderer.invoke("browser:settings"),
   saveBrowserSettings: (settings: BrowserSettings): Promise<BrowserSettings> => ipcRenderer.invoke("browser:settings-save", settings),
   closePlatformBrowser: (platform: Platform): Promise<void> => ipcRenderer.invoke("browser:close", platform),
-  openPlatformBrowser: (platform: Platform): Promise<void> => ipcRenderer.invoke("browser:open", platform),
+  openPlatformBrowser: (platform: Platform, viewOnly = false): Promise<void> => ipcRenderer.invoke("browser:open", platform, viewOnly),
   publishDrafts: (ids: string[]): Promise<Draft[]> => ipcRenderer.invoke("browser:publish", ids),
   cancelPublishBatch: (): Promise<void> => ipcRenderer.invoke("browser:cancel-publish"),
   getPublishBatch: (): Promise<string[]> => ipcRenderer.invoke("browser:publish-batch"),
@@ -70,10 +75,6 @@ const api = {
     ipcRenderer.invoke("drafts:generate-shared", ids),
   getSettings: (): Promise<SettingsView> =>
     ipcRenderer.invoke("settings:get"),
-  saveDeepSeekKey: (key: string): Promise<SettingsView> =>
-    ipcRenderer.invoke("settings:save-key", key),
-  clearDeepSeekKey: (): Promise<SettingsView> =>
-    ipcRenderer.invoke("settings:clear-key"),
   prepareDraft: (id: string): Promise<{ draft: Draft; folder: string }> =>
     ipcRenderer.invoke("drafts:prepare", id),
   startFileDrag: (id: string): void => {

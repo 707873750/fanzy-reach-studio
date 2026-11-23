@@ -22,7 +22,7 @@ let dimensions = { width: 1024, height: 1024 }, fileSize = 100;
 const api = await load('src/main/image-generation.ts', {
   electron: { safeStorage: { isEncryptionAvailable: () => encryption, encryptString: value => Buffer.from(value), decryptString: value => value.toString() } },
   './store': { getStore: () => ({ settings }), persistStore: async () => { saved++; }, findImage: id => id === 'source' ? asset : undefined },
-  './ai-service': { getSettings: () => ({ hasVolcKeys: !!settings.volcKeysEncrypted, hasPendingImageTask: !!settings.volcPendingTask }) },
+  './settings-service': { getSettings: () => ({ hasVolcKeys: !!settings.volcKeysEncrypted, hasPendingImageTask: !!settings.volcPendingTask }) },
   './image-service': { importFiles: async () => { imported++; return { imported: [{ id: 'new-image', originalPath: 'private', thumbnailPath: 'private' }], errors: importError ? ['disk failure'] : [], duplicates: [] }; } },
   './volc-signing': signing,
   '../shared/image-generation': { IMAGE_SIZES: ['1328x1328'], IMAGE_PROMPT_LIMIT: 800 },
@@ -114,7 +114,7 @@ console.log('PASS: signing, encrypted settings, exact model contracts, edit vali
 // Exercise actual image decoders, including WebP contents in a .png file.
 const sharp = nativeRequire('sharp');
 const realApi = await load('src/main/image-generation.ts', {
-  electron: {}, './store': {}, './ai-service': {}, './image-service': {},
+  electron: {}, './store': {}, './settings-service': {}, './image-service': {},
   './volc-signing': signing, '../shared/image-generation': {}
 });
 const pixels = { create: { width: 32, height: 32, channels: 4, background: { r: 30, g: 80, b: 120, alpha: 0.5 } } };

@@ -8,6 +8,7 @@ import sys
 from unittest.mock import AsyncMock, patch
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from playwright.async_api import async_playwright
 from publisher import Publisher
 import session_store
@@ -259,6 +260,23 @@ class PlaywrightPublishingTests(unittest.IsolatedAsyncioTestCase):
         ciphertext = (self.runner.profile(self.job)/'fanzy-session.bin').read_bytes()
         self.assertNotIn(b'saved_session',ciphertext)
         self.assertNotIn(b'saved-local',ciphertext)
+
+    async def test_shortcut_manual_close_preserves_account_and_allows_reopen(self):
+        job = {**self.job, 'viewOnly': True}
+        await self.runner.login(job)
+        self.assertEqual(self.native_calls[-1][1], 'https://x.com/')
+        await self.context.add_cookies([{'name':'saved_session','value':'fixture','domain':'x.com','path':'/','expires':(datetime.now(timezone.utc)+timedelta(days=1)).timestamp()}])
+        window = self.runner.logins[str(self.runner.profile(job))]
+        await window.close()
+        window.process = SimpleNamespace(poll=lambda: 0)
+        await self.runner.login(job)
+        self.assertEqual(len(self.native_calls), 2)
+        self.assertIn('saved_session=fixture', await self.context.pages[0].evaluate('document.cookie'))
+        window = self.runner.logins[str(self.runner.profile(job))]
+        await window.close()
+        window.process = SimpleNamespace(poll=lambda: 0)
+        result = await self.runner.publish(self.job, self.checkpoint)
+        self.assertEqual(result['state'], 'succeeded', result)
 
     async def test_login_platforms_and_close_failure(self):
         for platform in ('x', 'instagram', 'pinterest'):

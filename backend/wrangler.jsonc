@@ -1,0 +1,21 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "fanzy-image-demo",
+	"main": "src/worker.py",
+	"compatibility_date": "2026-11-23",
+	"compatibility_flags": [
+		"python_workers"
+	],
+	"vars": {
+		"GENERATION_ENABLED": "true",
+		"IMAGE_COST": "10",
+		"CHECKIN_REWARD": "30"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "fanzy-image-demo",
+			"database_id": "0176ba4e-532c-40c9-9394-151c09e1e41c"
+		}
+	]
+}

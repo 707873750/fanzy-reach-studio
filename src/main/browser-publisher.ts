@@ -152,13 +152,13 @@ function request(payload: {platform: Platform; [key: string]: unknown}, checkpoi
   return client.request(payload, checkpoint);
 }
 
-export async function openPlatformBrowser(platform: Platform) {
+export async function openPlatformBrowser(platform: Platform, viewOnly = false) {
   if (!["instagram", "x", "pinterest", "tiktok", "bluesky", "facebook"].includes(platform)) throw new Error("无效的平台");
   if (busy) throw new Error("请等待当前浏览器操作完成");
   busy = true;
   try {
     void log({ source: "app", level: "info", step: "account.inspect", message: "请求打开平台账号页面", platform });
-    const result = await request({ action: "login", platform, ...browserOptions() });
+    const result = await request({ action: "login", platform, viewOnly, ...browserOptions() });
     if (result.state !== "opened") throw new Error(result.message || "无法打开浏览器");
   } finally { busy = false; }
 }

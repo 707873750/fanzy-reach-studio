@@ -45,8 +45,7 @@ function App() {
   const [platforms, setPlatforms] = useState<Platform[]>(["instagram", "x", "pinterest", "tiktok", "bluesky", "facebook"]);
   const [copyOptions, setCopyOptions] = useState<CopyOptions>({sharedCaption:"", platforms:{facebook:{mode:"shared",caption:""},bluesky:{mode:"shared",caption:""},instagram:{mode:"shared",caption:""},x:{mode:"shared",caption:""},pinterest:{mode:"shared",caption:""},tiktok:{mode:"shared",caption:""}}});
   const [hashtags, setHashtags] = useState("");
-  const [settings, setSettings] = useState<SettingsView>({ hasDeepSeekKey: false, model: "deepseek-flash" });
-  const [apiKey, setApiKey] = useState("");
+  const [settings, setSettings] = useState<SettingsView>({ backendLoggedIn: false });
   const [showImageGenerator, setShowImageGenerator] = useState(false);
   const [caption, setCaption] = useState("");
   const [captionHtml, setCaptionHtml] = useState<string | undefined>();
@@ -210,6 +209,7 @@ function App() {
     } catch (error) {
       setNotice(error instanceof Error ? error.message : t("操作失败，请查看运行日志"));
     } finally {
+      await window.reach.getSettings().then(setSettings).catch(() => {});
       setBusy(false);
       setBusyText("");
     }
@@ -269,7 +269,7 @@ function App() {
   };
 
   const generateSelectedCaptions = () => {
-    if (busy || publishing || !settings.hasDeepSeekKey) return;
+    if (busy || publishing || !settings.backendLoggedIn) return;
     const targets = selectedDrafts.filter(draft => canEditCopy(draft) && !draftLocked(draft));
     if (!targets.length) return;
     void runBusy(t("正在批量生成独立文案…"), async () => {
@@ -290,7 +290,7 @@ function App() {
     });
   };
   const generateSelectedSharedCaption = () => {
-    if (busy || publishing || !settings.hasDeepSeekKey || !selectedDrafts.length || selectedDrafts.some(d => !canEditCopy(d) || draftLocked(d))) return;
+    if (busy || publishing || !settings.backendLoggedIn || !selectedDrafts.length || selectedDrafts.some(d => !canEditCopy(d) || draftLocked(d))) return;
     void runBusy(t("正在为所选草稿生成统一文案…"), async () => {
       const updated = await window.reach.generateSharedCaption(selectedDrafts.map(d => d.id));
       setNotice(t("已为 {0} 条草稿生成统一正文，并建立共享关联。修改其中一条共享正文会同步到本组；标题、话题等仍分别保留。", [updated.length]));
@@ -381,17 +381,11 @@ function App() {
         <button className={`nav-item ${page === "logs" ? "active" : ""}`} onClick={() => { setLogDraftId(""); setPage("logs"); }}><ListChecks size={17}/> {t("运行日志")}</button>
         <nav className="platform-shortcuts" aria-label={t("平台快捷入口")}>
           <div className="workspace-label">{t("平台快捷入口")}</div>
-          <p>{t("打开平台专用浏览器，沿用该平台账号。使用后点击保存并关闭。")}</p>
+          <p>{t("使用已登录的平台账号查看发布结果。")}</p>
           <div className="platform-shortcut-grid">
             {Object.entries(PLATFORM_META).map(([platform, meta]) => {
               const Icon = meta.icon;
-              return <div key={platform}>
-                <button className="platform-shortcut-open" disabled={browserBusy} title={t("打开 {0} 专用浏览器", [meta.label])} onClick={() => void runBusy(t("正在打开 {0} 专用浏览器…", [meta.label]), () => window.reach.openPlatformBrowser(platform as Platform))}><Icon size={15} style={{ color: meta.color }}/><span>{meta.label}</span><ArrowUpRight size={12}/></button>
-                <button className="platform-shortcut-close" disabled={browserBusy} aria-label={t("保存并关闭 {0} 浏览器", [meta.label])} onClick={() => void runBusy(t("正在保存 {0} 登录状态…", [meta.label]), async () => {
-                  await window.reach.closePlatformBrowser(platform as Platform);
-                  setNotice(t("{0} 浏览器已关闭，登录配置已保存。", [meta.label]));
-                })}>{t("保存并关闭")}</button>
-              </div>;
+              return <button key={platform} className="platform-shortcut-open" disabled={browserBusy} title={t("打开 {0} 网站", [meta.label])} onClick={() => void runBusy(t("正在打开 {0} 专用浏览器…", [meta.label]), () => window.reach.openPlatformBrowser(platform as Platform, true))}><Icon size={15} style={{ color: meta.color }}/><span>{meta.label}</span><ArrowUpRight size={12}/></button>;
             })}
           </div>
         </nav>
@@ -553,8 +547,8 @@ function App() {
                   <button className="button secondary" disabled={busy} onClick={() => setCheckedDrafts(queueDrafts.filter(d => canPublish(d) && !draftLocked(d)).slice(0, 100).map((d) => d.id))}>{t("选择可发布草稿（最多 100 条）")}</button>
                   <button className="button secondary" disabled={busy} onClick={() => setCheckedDrafts([])}>{t("清空选择")}</button>
                   <button className="button primary" disabled={browserBusy || !canSubmitSelection} onClick={publishSelected}><Send size={16}/> {t("提交选中的 {0} 条", [selectedDrafts.length])}</button>
-                  <button className="button secondary" disabled={busy || publishing || !settings.hasDeepSeekKey || !selectedDrafts.some(d => canEditCopy(d) && !draftLocked(d))} onClick={generateSelectedCaptions}><Sparkles size={16}/> {t("AI 批量生成独立文案")}</button>
-                  <button className="button secondary" disabled={busy || publishing || !settings.hasDeepSeekKey || !selectedDrafts.length || selectedDrafts.length > 100 || selectedDrafts.some(d => !canEditCopy(d) || draftLocked(d))} onClick={generateSelectedSharedCaption}><Sparkles size={16}/> {t("AI 生成统一文案")}</button>
+                  <button className="button secondary" disabled={busy || publishing || !settings.backendLoggedIn || !selectedDrafts.some(d => canEditCopy(d) && !draftLocked(d))} onClick={generateSelectedCaptions}><Sparkles size={16}/> {t("AI 批量生成独立文案")}</button>
+                  <button className="button secondary" disabled={busy || publishing || !settings.backendLoggedIn || !selectedDrafts.length || selectedDrafts.length > 100 || selectedDrafts.some(d => !canEditCopy(d) || draftLocked(d))} onClick={generateSelectedSharedCaption}><Sparkles size={16}/> {t("AI 生成统一文案")}</button>
                 </div>
                 <p className="muted">{t("批量 AI 会分别按平台生成并替换所选草稿的标题、正文、话题和图片说明，自动切换为独立文案。生成期间显示进度，单条失败不影响后续草稿。")}</p>
                 <p className="muted">{t("统一 AI 使用所选草稿的去重图片（最多 35 张）生成一份共享正文，保留各平台标题和话题，以及原独立正文备份。")}</p>
@@ -634,7 +628,7 @@ function App() {
                       </div>
                       <div className="field">
                         {selectedDraft.copyGroupId && <><label htmlFor="draft-copy-mode">{t("文案方式")}</label><select id="draft-copy-mode" disabled={detailBusy || !canEditCopy(selectedDraft)} value={selectedDraft.captionMode || "independent"} onChange={e=>switchCaptionMode(e.target.value as "shared" | "independent")}><option value="shared">{t("使用统一文案")}</option><option value="independent">{t("使用独立文案")}</option></select><p className="muted">{selectedDraft.captionMode === "shared" ? t("保存正文将同步本批次中使用统一文案的 {0} 条可编辑草稿。已发布、已排程及结果待确认的草稿不受影响。", [drafts.filter(d=>d.copyGroupId===selectedDraft.copyGroupId && d.captionMode==="shared" && canEditCopy(d)).length]) : t("仅修改当前草稿；切换为统一文案时会保留独立版本。")}</p></>}
-                        <div className="label-row"><label htmlFor="draft-caption">{t("正文文案")}</label><button className="text-button" onClick={generateCaption} disabled={detailBusy || !canEditCopy(selectedDraft) || !settings.hasDeepSeekKey}><Sparkles size={14}/> {t("AI 生成独立文案")}</button></div>
+                        <div className="label-row"><label htmlFor="draft-caption">{t("正文文案")}</label><button className="text-button" onClick={generateCaption} disabled={detailBusy || !canEditCopy(selectedDraft) || !settings.backendLoggedIn}><Sparkles size={14}/> {t("AI 生成独立文案")}</button></div>
                         <p className="muted">{t("AI 生成将使用当前平台的独立文案。标题、话题标签、图片说明、图板和定时时间始终分别设置。")}</p>
                         <CaptionEditor key={selectedDraft.id + selectedDraft.captionMode} id="draft-caption" maxLength={5000} disabled={detailBusy || !canEditCopy(selectedDraft)} rows={6} value={caption} html={captionHtml} onChange={(value,html)=>{setCaption(value);setCaptionHtml(html);}} placeholder={t("输入文案，或使用 AI 生成…")}/>
                       </div>
@@ -682,18 +676,13 @@ function App() {
                 <p className="muted">{t("失败截图保存在日志目录的 screenshots 子目录，最多保留 50 张；可能包含账号和草稿内容。可在运行日志中查看路径并打开日志文件夹。")}</p>
               </section>
               <section className="panel settings-panel">
-                <div className="settings-title"><div className="provider-mark"><Sparkles/></div><div><h2>{t("DeepSeek 图片理解")}</h2><p>{t("分析图片，为各平台生成英文文案。")}</p></div></div>
-                <div className="field"><label>{t("API 密钥")}</label><input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={settings.hasDeepSeekKey ? t("密钥已安全保存在本机") : "sk-…"}/><small>{t("密钥使用 Windows 安全存储加密，不会以明文保存在应用数据中。")}</small></div>
-                <div className="settings-actions">
-                  <button className="button primary" disabled={busy || !apiKey.trim()} onClick={() => void runBusy(t("正在加密保存 API 密钥…"), async () => { const next = await window.reach.saveDeepSeekKey(apiKey); setSettings(next); setApiKey(""); })}>{t("保存 API 密钥")}</button>
-                  <button className="button secondary" disabled={busy || !settings.hasDeepSeekKey} onClick={() => void runBusy(t("正在移除 API 密钥…"), async () => { setSettings(await window.reach.clearDeepSeekKey()); })}>{t("移除密钥")}</button>
-                </div>
-                <div className="key-status"><span className={`status-dot ${settings.hasDeepSeekKey ? "published" : "draft"}`}/>{settings.hasDeepSeekKey ? t("已配置 DeepSeek API 密钥") : t("AI 为可选功能，也可以手动创建和编辑文案。")}</div>
-                <a href="https://platform.deepseek.com/" onClick={(e) => { e.preventDefault(); void window.reach.openExternal("https://platform.deepseek.com/"); }}>{t("获取 DeepSeek API 密钥")}<ArrowUpRight size={14}/></a>
+                <div className="settings-title"><div className="provider-mark"><Sparkles/></div><div><h2>{t("图片理解")}</h2><p>{t("分析图片，为各平台生成英文文案。")}</p></div></div>
+                <p className="muted">{t("登录账户后即可使用图片理解，无需填写 API 密钥。")}</p>
+                <div className="key-status"><span className={`status-dot ${settings.backendLoggedIn ? "published" : "draft"}`}/>{settings.backendLoggedIn ? t("已登录，可生成 AI 文案") : t("请先登录下方账户，也可以手动创建和编辑文案。")}</div>
               </section>
               <ImageGenerationSettings busy={busy} settings={settings} setSettings={setSettings} runBusy={runBusy}/>
               <PlatformSettings/>
-              <section className="panel"><h2>{t("隐私说明")}</h2><p className="muted">{t("图片、草稿和导出文件均保存在本地。生成 AI 文案时，会将所选图片发送至 DeepSeek；发布时将内容上传至所选平台。各平台使用本机独立保存的浏览器配置。")}</p></section>
+              <section className="panel"><h2>{t("隐私说明")}</h2><p className="muted">{t("图片、草稿和导出文件均保存在本地。生成 AI 文案时，会将压缩后的所选图片发送至服务器，由服务器调用 DeepSeek；发布时将内容上传至所选平台。各平台使用本机独立保存的浏览器配置。")}</p></section>
             </>
           )}
         </div>

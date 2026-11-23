@@ -39,8 +39,6 @@ button { cursor: pointer; }
 .platform-shortcut-grid button:focus-visible { outline: 2px solid #9a83ff; outline-offset: 2px; }
 .platform-shortcut-open > svg { flex-shrink: 0; }
 .platform-shortcut-open > svg:last-child { margin-left: auto; color: #898b99; }
-.platform-shortcut-close { border: 0; background: transparent; color: #a6a7b5; font-size: 10px; padding: 3px 6px 8px; }
-.platform-shortcut-close:hover:not(:disabled) { color: #fff; }
 .platform-shortcut-grid button:disabled { opacity: .45; cursor: not-allowed; }
 .local-card { border: 1px solid #30313b; background: #1a1b23; border-radius: 10px; padding: 12px; display: flex; gap: 9px; align-items: flex-start; }
 .local-icon { color: #66c99a; }
@@ -225,3 +223,24 @@ button { cursor: pointer; }
 .caption-rich-input a, .caption-rich-record a { color: #b4a2ff; text-decoration: underline; }
 .caption-rich-input ul, .caption-rich-input ol, .caption-rich-record ul, .caption-rich-record ol { padding-left: 24px; }
 .caption-link-controls { margin-top: 8px; }
+/* Server-backed image demo */
+.backend-account { padding-bottom: 20px; border-bottom: 1px solid #373844; margin-bottom: 22px; }
+.backend-account .field label, .backend-account .field input, .backend-account .field small { font-size: 14px; }
+.backend-demo-tag { margin-left: auto; border-radius: 6px; background: #302647; color: #c4b5ff; padding: 4px 8px; font-size: 12px; font-weight: 700; letter-spacing: .06em; }
+.backend-login-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.backend-wallet { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px; border: 1px solid #544271; border-radius: 12px; background: #272135; color: #eee9ff; }
+.backend-balance { display: flex; align-items: baseline; gap: 9px; margin-top: 8px; }
+.backend-balance strong { font-size: 36px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.backend-balance svg { align-self: center; color: #b59bff; }
+.backend-meta { display: grid; gap: 5px; margin: 12px 0; font-size: 13px; color: #a6a7b5; overflow-wrap: anywhere; }
+.backend-ledger { margin-top: 16px; font-size: 14px; }
+.backend-ledger summary { cursor: pointer; }
+.backend-ledger ul { list-style: none; padding: 0; margin: 12px 0 0; }
+.backend-ledger li { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid #373844; }
+.backend-ledger small { display: block; font-size: 12px; color: #a6a7b5; margin-top: 3px; }
+.backend-generator-title { display: flex; align-items: center; gap: 9px; margin-bottom: 18px; }
+.backend-generator-title h2 { margin: 0; }
+.backend-generator-title > span { margin-left: auto; font-size: 13px; color: #a6a7b5; }
+.backend-preview { display: block; max-width: 100%; max-height: 560px; object-fit: contain; margin: 0 auto 16px; border-radius: 10px; }
+.backend-pending { padding: 14px; background: #272135; border-radius: 10px; margin-bottom: 16px; }
+@media (max-width: 650px) { .backend-login-fields { grid-template-columns: 1fr; gap: 0; } .backend-wallet { flex-wrap: wrap; } }

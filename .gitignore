@@ -13,3 +13,11 @@ Thumbs.db
 __pycache__/
 browser-profiles/
 build/
+backend/.local/
+backend/.dev.vars
+backend/.wrangler/
+backend/.venv/
+backend/.venv-workers/
+backend/.pyodide-venv/
+backend/node_modules/
+backend/python_modules/

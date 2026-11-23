@@ -5,7 +5,7 @@ if (process.type === 'renderer') {
   window.fixture = {previewed:null,created:null};
   window.reach = {
     listImages:async()=>[clip,{...clip,id:'long',fileName:'long.mp4',video:{...clip.video,duration:200}}, {...common,id:'photo',fileName:'photo.jpg',mimeType:'image/jpeg',sourceFolders:['C:\\Photos']}],
-    listDrafts:async()=>[],getSettings:async()=>({hasDeepSeekKey:false,model:'fixture'}),getBrowserSettings:async()=>({showBrowser:false,channel:'chrome'}),
+    listDrafts:async()=>[],getSettings:async()=>({backendLoggedIn:false}),getBrowserSettings:async()=>({showBrowser:false,channel:'chrome'}),
     onScheduleReminder:()=>()=>{},onPublishProgress:()=>()=>{},reportUiPerformance:async()=>{},reportRendererError:async()=>{},
     previewMedia:async id=>{window.fixture.previewed=id;},
     createDrafts:async(ids,platforms)=>{window.fixture.created={ids,platforms};return [];}

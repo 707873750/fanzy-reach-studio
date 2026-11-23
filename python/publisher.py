@@ -59,7 +59,16 @@ class Publisher:
             raise ValueError('不支持的平台或浏览器')
         return Path(request['profilesRoot']).resolve() / channel / platform
 
+    async def finish_closed_window(self, request):
+        window = self.logins.get(str(self.profile(request)))
+        process = getattr(window, 'process', None)
+        if process is not None and process.poll() is not None:
+            # A user can close a shortcut window directly. Save its profile before
+            # reopening it or restoring a snapshot for the next publication.
+            await self.close_login(request)
+
     async def launch(self, request, visible=False, restore_session=True):
+        await self.finish_closed_window(request)
         profile = self.profile(request)
         if str(profile) in self.logins:
             raise ValueError('该平台登录窗口仍打开，请先点击“完成登录 / 关闭窗口”保存登录状态')
@@ -91,12 +100,16 @@ class Publisher:
     async def login(self, request):
         if request.get('channel', 'chrome') != 'chrome':
             raise ValueError('普通浏览器登录与发布请统一使用 Chrome')
+        await self.finish_closed_window(request)
         profile = self.profile(request)
         key = str(profile)
         if key in self.logins:
             raise ValueError('该平台已有登录会话，请先点击完成登录保存后再打开')
         self.log('login.native_launch', '使用普通 Chrome 打开专用登录窗口（不启用 Playwright）', request)
-        window = await self.native_login_factory(profile, LOGIN_URLS[request['platform']])
+        url = LOGIN_URLS[request['platform']]
+        if request.get('viewOnly'):
+            url = 'https://' + urlsplit(url).netloc + '/'
+        window = await self.native_login_factory(profile, url)
         self.logins[key] = window
         self.login_requests[key] = request
         self.log('login.open', '请在普通 Chrome 中登录；完成后点击程序中的“完成登录 / 关闭窗口”保存完整登录快照', request)

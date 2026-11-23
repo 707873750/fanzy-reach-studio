@@ -4,9 +4,11 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import { initStore, getStore, persistStore, getAppPaths, findDraft, findImage } from "./store";
 import { importFiles, listImages, deleteImage } from "./image-service";
-import { saveVolcKeys, clearVolcKeys, generateImage, resumeImageTask, discardImageTask, getGeneratedImage, saveGeneratedImage, loadEditImage } from "./image-generation";
+import { saveVolcKeys, clearVolcKeys, loadEditImage } from "./image-generation";
+import { backendLogin, backendRegister, backendLogout, backendAccount, backendCheckin, generateImage, resumeImageTask, discardImageTask, getGeneratedImage, saveGeneratedImage } from "./backend-service";
 import { createDrafts, listDrafts, deleteDraft, deleteDrafts, deleteLocalScheduledDrafts, deletePublishRecords, updateDraft, prepareDraft, markPublished, scheduleDraft } from "./draft-service";
-import { generateCaption, generateSharedCaption, saveDeepSeekKey, clearDeepSeekKey, getSettings } from "./ai-service";
+import { getSettings } from "./settings-service";
+import { generateCaption, generateSharedCaption } from "./ai-service";
 import type { CopyOptions, Platform } from "../shared/types";
 import { runDueScheduledDrafts, assertNotPublishing, getBrowserSettings, saveBrowserSettings, closePlatformBrowser, openPlatformBrowser, publishDrafts, cancelPublishBatch, getPublishBatch, resolvePublish, recoverPublishing, stopPublisher } from "./browser-publisher";
 
@@ -64,7 +66,7 @@ function registerIpc() {
   handle("browser:settings", () => getBrowserSettings());
   handle("browser:settings-save", (_event, settings) => saveBrowserSettings(settings));
   handle("browser:close", (_event, platform: Platform) => closePlatformBrowser(platform));
-  handle("browser:open", (_event, platform: Platform) => openPlatformBrowser(platform));
+  handle("browser:open", (_event, platform: Platform, viewOnly: unknown) => openPlatformBrowser(platform, viewOnly === true));
   handle("browser:publish", (_event, ids: string[]) => publishDrafts(ids));
   handle("browser:cancel-publish", () => cancelPublishBatch());
   handle("browser:publish-batch", () => getPublishBatch());
@@ -163,6 +165,11 @@ function registerIpc() {
   handle("drafts:schedule", (_event, id: string, date: string) => { assertNotPublishing(id); return scheduleDraft(id, date); });
 
   handle("settings:get", () => getSettings());
+  handle('backend:login', (_event, username, password) => backendLogin(username, password));
+  handle('backend:register', (_event, username, password) => backendRegister(username, password));
+  handle('backend:logout', () => backendLogout());
+  handle('backend:account', () => backendAccount());
+  handle('backend:checkin', () => backendCheckin());
   handle("settings:volc-save", (_event, ak, sk) => saveVolcKeys(ak, sk));
   handle("settings:volc-clear", () => clearVolcKeys());
   handle("images:generate", (_event, input) => generateImage(input));
@@ -177,8 +184,6 @@ function registerIpc() {
   handle("images:discard", () => discardImageTask());
   handle("settings:platforms", () => getPlatformDefaults());
   handle("settings:platform-save", (_event, platform, value) => savePlatformDefaults(platform, value));
-  handle("settings:save-key", (_event, key: string) => saveDeepSeekKey(key));
-  handle("settings:clear-key", () => clearDeepSeekKey());
 
   handle("external:open", async (_event, url: string) => {
     const parsed = new URL(url);

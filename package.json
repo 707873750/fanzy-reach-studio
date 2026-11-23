@@ -5,6 +5,12 @@
   "description": "Local-first multi-platform image publishing assistant",
   "main": "out/main/index.js",
   "scripts": {
+    "demo:server": "node backend/local.mjs",
+    "backend:install": "uv sync --project backend --no-default-groups --group local --group test",
+    "backend:dev": "uv run --directory backend --no-default-groups --group local python local.py",
+    "backend:worker": "uv run --directory backend pywrangler dev",
+    "backend:deploy": "uv run --directory backend pywrangler deploy",
+    "test:backend": "uv run --directory backend --no-default-groups --group test python -m unittest discover -s tests -v",
     "dev": "electron-vite dev",
     "typecheck": "tsc --noEmit",
     "build": "electron-vite build",

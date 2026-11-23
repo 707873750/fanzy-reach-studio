@@ -77,10 +77,9 @@ export interface Draft {
 }
 
 export interface SettingsView {
+  backendLoggedIn?: boolean;
   hasVolcKeys?: boolean;
   hasPendingImageTask?: boolean;
-  hasDeepSeekKey: boolean;
-  model: string;
 }
 
 export interface ImportResult {
@@ -94,6 +93,11 @@ export interface CreateDraftResult {
 }
 
 export interface ReachApi {
+  backendLogin: (username: string, password: string) => Promise<SettingsView>;
+  backendRegister: (username: string, password: string) => Promise<SettingsView>;
+  backendLogout: () => Promise<SettingsView>;
+  backendAccount: () => Promise<import('./backend').BackendAccount>;
+  backendCheckin: () => Promise<import('./backend').BackendAccount>;
   saveVolcKeys: (ak: string, sk: string) => Promise<SettingsView>;
   clearVolcKeys: () => Promise<SettingsView>;
   pickEditImage: () => Promise<EditImageUpload | null>;
@@ -113,7 +117,7 @@ export interface ReachApi {
   getBrowserSettings: () => Promise<BrowserSettings>;
   saveBrowserSettings: (settings: BrowserSettings) => Promise<BrowserSettings>;
   closePlatformBrowser: (platform: Platform) => Promise<void>;
-  openPlatformBrowser: (platform: Platform) => Promise<void>;
+  openPlatformBrowser: (platform: Platform, viewOnly?: boolean) => Promise<void>;
   publishDrafts: (ids: string[]) => Promise<Draft[]>;
   cancelPublishBatch: () => Promise<void>;
   getPublishBatch: () => Promise<string[]>;
@@ -135,8 +139,6 @@ export interface ReachApi {
   generateCaption: (draftId: string) => Promise<Draft>;
   generateSharedCaption: (draftIds: string[]) => Promise<Draft[]>;
   getSettings: () => Promise<SettingsView>;
-  saveDeepSeekKey: (apiKey: string) => Promise<SettingsView>;
-  clearDeepSeekKey: () => Promise<SettingsView>;
   prepareDraft: (draftId: string) => Promise<{ draft: Draft; folder: string }>;
   startFileDrag: (draftId: string) => void;
   markPublished: (draftId: string, publishedUrl?: string) => Promise<Draft>;

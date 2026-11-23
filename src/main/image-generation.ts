@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { setTimeout as delay } from "node:timers/promises";
 import { getStore, persistStore, findImage } from "./store";
-import { getSettings } from "./ai-service";
+import { getSettings } from "./settings-service";
 import { importFiles } from "./image-service";
 import { IMAGE_SIZES, IMAGE_PROMPT_LIMIT, type GenerateImageRequest } from "../shared/image-generation";
 import { signVisualRequest } from "./volc-signing";
