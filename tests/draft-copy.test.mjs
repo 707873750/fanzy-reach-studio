@@ -44,7 +44,7 @@ const serviceSource=await fs.readFile('src/main/draft-service.ts','utf8');
 const serviceCompiled=ts.transpileModule(serviceSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText;
 const nativeRequire=createRequire(import.meta.url);
 const videoRules = await import('data:text/javascript;base64,' + Buffer.from(ts.transpileModule(await fs.readFile('src/shared/video-rules.ts','utf8'), {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}}).outputText).toString('base64'));
-const sandbox={exports:{},require:name=>name==='./accounts'?{getAccount:(platform,id)=>({id:id||`default-${platform}`,platform})}:name==='../shared/video-rules'?videoRules:name==='./store'?store:name==='../shared/draft-copy'?{applyCaptionPatch,canEditCopy}:name==='../shared/draft-lifecycle'?lifecycle:name==='../shared/platform-defaults'?defaultsModule:name==='electron'?{}:name==='sharp'?()=>{}:nativeRequire(name)};
+const sandbox={exports:{},require:name=>name==='./image-render'?{}:name==='./accounts'?{getAccount:(platform,id)=>({id:id||`default-${platform}`,platform})}:name==='../shared/video-rules'?videoRules:name==='./store'?store:name==='../shared/draft-copy'?{applyCaptionPatch,canEditCopy}:name==='../shared/draft-lifecycle'?lifecycle:name==='../shared/platform-defaults'?defaultsModule:name==='electron'?{}:name==='sharp'?()=>{}:nativeRequire(name)};
 vm.runInNewContext(serviceCompiled,sandbox);
 const svc=sandbox.exports;
 const batch=await svc.createDrafts(['0','1','2','3','4'],['instagram','x','pinterest'],{sharedCaption:'共用正文',platforms:{instagram:{mode:'shared',caption:'IG 备份'},x:{mode:'independent',caption:'X 专属'},pinterest:{mode:'shared',caption:''}}});

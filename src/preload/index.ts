@@ -4,6 +4,9 @@ import type { PlatformDefaults, PlatformDefaultsMap } from "../shared/types";
 import type { BrowserSettings, CopyOptions, DraftPatch, Draft, ImageAsset, ImportResult, Platform, SettingsView, RunLog, LogSnapshot } from "../shared/types";
 
 const api = {
+  previewImageEdit: (id: string, options: import("../shared/image-edit").ImageEditOptions) => ipcRenderer.invoke("images:edit-preview",id,options),
+  saveImageEdit: (id: string, options: import("../shared/image-edit").ImageEditOptions) => ipcRenderer.invoke("images:edit-save",id,options),
+  previewPublishImage: (id: string, platform: Platform) => ipcRenderer.invoke("images:publish-preview",id,platform),
   listAccounts: () => ipcRenderer.invoke("accounts:list"),
   addAccount: (platform: Platform, name: string) => ipcRenderer.invoke("accounts:add", platform, name),
   deleteAccount: (id: string) => ipcRenderer.invoke("accounts:delete", id),

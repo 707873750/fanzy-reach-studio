@@ -1,3 +1,4 @@
+import { previewImageEdit, saveImageEdit, previewPublishImage } from "./image-editor";
 import { listAccounts, addAccount, renameAccount, deleteAccount } from "./accounts";
 import { canEditCopy } from "../shared/draft-copy";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
@@ -65,6 +66,9 @@ function registerIpc() {
     const error = await shell.openPath(snapshot.directory);
     if (error) throw new Error(error);
   });
+  handle("images:edit-preview", (_event, id, options) => previewImageEdit(id, options));
+  handle("images:edit-save", (_event, id, options) => saveImageEdit(id, options));
+  handle("images:publish-preview", (_event, id, platform) => previewPublishImage(id, platform));
   handle("accounts:list", () => listAccounts());
   handle("accounts:add", (_event, platform, name) => addAccount(platform, name));
   handle("accounts:delete", (_event, id: string) => deleteAccount(id));

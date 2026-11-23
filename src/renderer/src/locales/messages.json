@@ -2430,5 +2430,253 @@
     "This account still has linked drafts, scheduled tasks or publishing records. Reassign drafts or remove linked tasks and records before deleting it.",
     "このアカウントには下書き、予約タスク、投稿履歴が関連付けられています。下書きのアカウントを変更するか、関連するタスクと履歴を削除してから再度お試しください。",
     "이 계정에는 연결된 초안, 예약 작업 또는 게시 기록이 있습니다. 초안의 계정을 변경하거나 연결된 작업과 기록을 제거한 후 계정을 삭제하세요."
-  ]
+  ],
+  "图片编辑": [
+    "Image editor",
+    "画像編集",
+    "이미지 편집"
+  ],
+  "原图保持不变，保存为新的素材副本。动图仅编辑第一帧。": [
+    "The original stays unchanged. Save as a new media copy. Only the first frame of animated images is edited.",
+    "元画像は変更せず、新しい素材として保存します。アニメーション画像は最初のフレームのみ編集します。",
+    "원본은 변경하지 않고 새 미디어 사본으로 저장합니다. 움직이는 이미지는 첫 프레임만 편집합니다."
+  ],
+  "裁剪区域": [
+    "Crop area",
+    "切り抜き範囲",
+    "자르기 영역"
+  ],
+  "拖动裁剪框调整位置，也可使用下方滑块。": [
+    "Drag the crop area to move it, or use the sliders.",
+    "切り抜き枠をドラッグするか、スライダーで位置を調整してください。",
+    "자르기 영역을 드래그하거나 슬라이더로 위치를 조절하세요."
+  ],
+  "拖动裁剪区域": [
+    "Drag crop area",
+    "切り抜き範囲をドラッグ",
+    "자르기 영역 드래그"
+  ],
+  "编辑效果": [
+    "Edited result",
+    "編集結果",
+    "편집 결과"
+  ],
+  "裁剪比例": [
+    "Crop ratio",
+    "切り抜き比率",
+    "자르기 비율"
+  ],
+  "自由裁剪": [
+    "Free crop",
+    "自由に切り抜き",
+    "자유 자르기"
+  ],
+  "顺时针旋转 90°": [
+    "Rotate 90° clockwise",
+    "時計回りに90°回転",
+    "시계 방향으로 90° 회전"
+  ],
+  "裁剪宽度": [
+    "Crop width",
+    "切り抜き幅",
+    "자르기 너비"
+  ],
+  "裁剪高度": [
+    "Crop height",
+    "切り抜き高さ",
+    "자르기 높이"
+  ],
+  "水平位置": [
+    "Horizontal position",
+    "水平位置",
+    "가로 위치"
+  ],
+  "垂直位置": [
+    "Vertical position",
+    "垂直位置",
+    "세로 위치"
+  ],
+  "文字水印": [
+    "Text watermark",
+    "文字の透かし",
+    "텍스트 워터마크"
+  ],
+  "水印文字": [
+    "Watermark text",
+    "透かしの文字",
+    "워터마크 텍스트"
+  ],
+  "留空不添加水印": [
+    "Leave blank for no watermark",
+    "空欄の場合は透かしなし",
+    "비워 두면 워터마크 없음"
+  ],
+  "文字颜色": [
+    "Text color",
+    "文字色",
+    "텍스트 색상"
+  ],
+  "文字大小": [
+    "Text size",
+    "文字サイズ",
+    "텍스트 크기"
+  ],
+  "水印不透明度": [
+    "Watermark opacity",
+    "透かしの不透明度",
+    "워터마크 불투명도"
+  ],
+  "水印水平位置": [
+    "Watermark horizontal position",
+    "透かしの水平位置",
+    "워터마크 가로 위치"
+  ],
+  "水印垂直位置": [
+    "Watermark vertical position",
+    "透かしの垂直位置",
+    "워터마크 세로 위치"
+  ],
+  "重置编辑": [
+    "Reset edits",
+    "編集をリセット",
+    "편집 초기화"
+  ],
+  "请检查水印是否超出边缘，预览显示最终裁剪效果。": [
+    "Check that the watermark fits within the edges. The preview shows the final crop.",
+    "透かしが端からはみ出していないか確認してください。プレビューには最終的な切り抜き結果が表示されます。",
+    "워터마크가 가장자리를 벗어나지 않는지 확인하세요. 미리보기에 최종 자르기 결과가 표시됩니다."
+  ],
+  "正在保存副本…": [
+    "Saving copy…",
+    "コピーを保存中…",
+    "사본 저장 중…"
+  ],
+  "保存为新素材": [
+    "Save as new media",
+    "新しい素材として保存",
+    "새 미디어로 저장"
+  ],
+  "发布预览": [
+    "Publishing preview",
+    "投稿プレビュー",
+    "게시 미리보기"
+  ],
+  "预览平台": [
+    "Preview platform",
+    "プレビュープラットフォーム",
+    "미리보기 플랫폼"
+  ],
+  "平台样式为模拟预览。图片使用实际发布处理逻辑，平台压缩、字体和折叠效果可能不同。": [
+    "Platform layout is simulated. Images use the publishing pipeline; platform compression, fonts and text folding may differ.",
+    "レイアウトはシミュレーションです。画像は投稿と同じ処理を使用しますが、圧縮、フォント、本文の折りたたみは異なる場合があります。",
+    "플랫폼 레이아웃은 시뮬레이션입니다. 이미지는 실제 게시 처리 과정을 사용하지만 압축, 글꼴, 텍스트 접기는 다를 수 있습니다."
+  ],
+  "仅比较显示效果，实际发布目标仍为 {0}。": [
+    "Display comparison only. The publishing target remains {0}.",
+    "表示の比較のみです。実際の投稿先は {0} のままです。",
+    "표시 비교용입니다. 실제 게시 대상은 {0}입니다."
+  ],
+  "示例账号": [
+    "Example account",
+    "サンプルアカウント",
+    "예시 계정"
+  ],
+  "帖子预览": [
+    "Post preview",
+    "投稿のプレビュー",
+    "게시물 미리보기"
+  ],
+  "视频封面": [
+    "Video cover",
+    "動画カバー",
+    "동영상 표지"
+  ],
+  "视频仅展示封面": [
+    "Videos show the cover only",
+    "動画はカバーのみ表示します",
+    "동영상은 표지만 표시됩니다"
+  ],
+  "发布图片": [
+    "Publishing image",
+    "投稿画像",
+    "게시 이미지"
+  ],
+  "没有可预览的图片": [
+    "No image to preview",
+    "プレビューする画像がありません",
+    "미리볼 이미지가 없습니다"
+  ],
+  "上一张": [
+    "Previous image",
+    "前の画像",
+    "이전 이미지"
+  ],
+  "下一张": [
+    "Next image",
+    "次の画像",
+    "다음 이미지"
+  ],
+  "收起文案": [
+    "Collapse text",
+    "本文を折りたたむ",
+    "텍스트 접기"
+  ],
+  "展开文案": [
+    "Expand text",
+    "本文を展開",
+    "텍스트 펼치기"
+  ],
+  "查看第 {0} 张": [
+    "View image {0}",
+    "画像 {0} を表示",
+    "이미지 {0} 보기"
+  ],
+  "向前移动": [
+    "Move earlier",
+    "前へ移動",
+    "앞으로 이동"
+  ],
+  "向后移动": [
+    "Move later",
+    "後ろへ移動",
+    "뒤로 이동"
+  ],
+  "拖动缩略图调整顺序，点击保存修改后生效。预览不会提交发布。": [
+    "Drag thumbnails to reorder, then save changes. Previewing does not publish.",
+    "サムネイルをドラッグして並べ替え、変更を保存してください。プレビューでは投稿されません。",
+    "썸네일을 드래그해 순서를 바꾸고 변경 사항을 저장하세요. 미리보기는 게시하지 않습니다."
+  ],
+  "已保存编辑副本，原图保持不变。": [
+    "Edited copy saved. The original is unchanged.",
+    "編集したコピーを保存しました。元画像は変更されていません。",
+    "편집 사본을 저장했습니다. 원본은 변경되지 않았습니다."
+  ],
+  "编辑所选图片": [
+    "Edit selected image",
+    "選択した画像を編集",
+    "선택한 이미지 편집"
+  ],
+  "图片编辑参数无效": [
+    "Invalid image editing settings",
+    "画像編集の設定が無効です",
+    "이미지 편집 설정이 올바르지 않습니다"
+  ],
+  "请选择可编辑的图片": [
+    "Select an editable image",
+    "編集できる画像を選択してください",
+    "편집 가능한 이미지를 선택하세요"
+  ],
+  "请先取消本地定时，再调整图片顺序": [
+    "Cancel local scheduling before reordering images",
+    "画像の並べ替え前にローカル予約を解除してください",
+    "이미지 순서를 변경하기 전에 로컬 예약을 취소하세요"
+  ],
+  "图片顺序无效": [
+    "Invalid image order",
+    "画像の順序が無効です",
+    "이미지 순서가 올바르지 않습니다"
+  ],
+  "关闭": ["Close", "閉じる", "닫기"],
+  "图片处理失败，请检查素材文件或稍后重试。": ["Image processing failed. Check the media file or try again later.", "画像を処理できませんでした。素材ファイルを確認するか、後でもう一度お試しください。", "이미지 처리에 실패했습니다. 미디어 파일을 확인하거나 나중에 다시 시도하세요."],
+  "拖动整图或框外重新框选；拖动框内移动，拖动边角缩放。": ["Drag on the full image or outside the crop to draw a new area. Drag inside to move it, or drag its edges and corners to resize.", "画像全体や枠の外をドラッグして範囲を選択。枠内をドラッグして移動し、辺や角をドラッグしてサイズを変更できます。", "전체 이미지나 영역 밖을 드래그해 새 영역을 선택하세요. 안쪽을 드래그하면 이동하고 가장자리와 모서리를 드래그하면 크기를 조절합니다."]
 }

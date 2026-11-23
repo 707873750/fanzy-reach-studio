@@ -15,7 +15,7 @@ export interface CopyOptions {
   sharedCaptionHtml?: string;
   platforms: Partial<Record<Platform, { mode: "shared" | "independent"; caption: string; captionHtml?: string }>>;
 }
-export type DraftPatch = Partial<Pick<Draft, "accountId" | "title" | "caption" | "captionHtml" | "altText" | "hashtags" | "boardName" | "xScheduledAt" | "publishAt" | "captionMode" | "tiktokPrivacy">>;
+export type DraftPatch = Partial<Pick<Draft, "imageIds" | "accountId" | "title" | "caption" | "captionHtml" | "altText" | "hashtags" | "boardName" | "xScheduledAt" | "publishAt" | "captionMode" | "tiktokPrivacy">>;
 export interface BrowserSettings { showBrowser: boolean; channel: "msedge" | "chrome" | "chromium"; }
 export interface RunLog {
   id: string;
@@ -34,6 +34,8 @@ export interface LogSnapshot { entries: RunLog[]; directory: string; storageErro
 export type DraftStatus = "draft" | "ready" | "scheduled" | "local_scheduled" | "prepared" | "published" | "reminder_due" | "platform_scheduled";
 
 export interface ImageAsset {
+  editSourceId?: string;
+  editOptions?: import("./image-edit").ImageEditOptions;
   id: string;
   fileName: string;
   sourceFolders?: string[];
@@ -98,6 +100,9 @@ export interface CreateDraftResult {
 
 export interface ContentStyle { name: string; language: string; tone: string; audience: string; brand: string; forbidden: string; }
 export interface ReachApi {
+  previewImageEdit: (id: string, options: import("./image-edit").ImageEditOptions) => Promise<import("./image-edit").ImagePreview>;
+  saveImageEdit: (id: string, options: import("./image-edit").ImageEditOptions) => Promise<ImageAsset>;
+  previewPublishImage: (id: string, platform: Platform) => Promise<import("./image-edit").ImagePreview>;
   listAccounts: () => Promise<PlatformAccount[]>;
   addAccount: (platform: Platform, name: string) => Promise<PlatformAccount>;
   deleteAccount: (id: string) => Promise<void>;

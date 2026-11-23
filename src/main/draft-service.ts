@@ -1,8 +1,8 @@
+import { renderPublishImage } from "./image-render";
 import { getAccount } from "./accounts";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import sharp from "sharp";
 import { clipboard, shell } from "electron";
 import { getAppPaths, getStore, findDraft, findImage, persistStore, updateDraftRecord } from "./store";
 import type { CopyOptions, Draft, DraftPatch, Platform } from "../shared/types";
@@ -10,15 +10,6 @@ import { applyCaptionPatch, canEditCopy } from "../shared/draft-copy";
 import { readPlatformDefaults } from "../shared/platform-defaults";
 import { canDeleteDraft, canDeletePublishRecord, isLocalScheduledDraft } from "../shared/draft-lifecycle";
 import { assertVideoCompatible, assertVideoCaption, groupMedia, isVideo } from "../shared/video-rules";
-
-const PLATFORM_SIZES: Record<Platform, { width: number; height: number }> = {
-  facebook: { width: 2048, height: 2048 },
-  bluesky: { width: 1600, height: 1600 },
-  instagram: { width: 1080, height: 1350 },
-  x: { width: 1600, height: 900 },
-  pinterest: { width: 1000, height: 1500 },
-  tiktok: { width: 1080, height: 1920 }
-};
 
 export async function createDrafts(imageIds: string[], platforms: Platform[], copy?: CopyOptions, accountIds?: string[]) {
   if (!imageIds.length) throw new Error("请至少选择一张图片");
@@ -104,6 +95,12 @@ export async function updateDraft(draftId: string, patch: DraftPatch) {
   if (!existing) throw new Error("未找到草稿");
   if (!canEditCopy(existing)) throw new Error("请先核对发布结果；已发布或已排程的草稿不能修改");
   if (existing.browserPublish?.state === "scheduled") throw new Error("该任务已提交到 X，请在 X 的已排程帖子中修改或取消");
+  if (patch.imageIds !== undefined && JSON.stringify(patch.imageIds)!==JSON.stringify(existing.imageIds)) {
+    if (existing.status === "local_scheduled") throw new Error("请先取消本地定时，再调整图片顺序");
+    if (!Array.isArray(patch.imageIds) || patch.imageIds.length!==existing.imageIds.length || new Set(patch.imageIds).size!==existing.imageIds.length || patch.imageIds.some(id=>typeof id!=="string"||!existing.imageIds.includes(id))) throw new Error("图片顺序无效");
+    allowed.imageIds=[...patch.imageIds];
+    allowed.preparedFolder=null;
+  }
   if (patch.accountId !== undefined && patch.accountId !== existing.accountId) {
     if (existing.status === "local_scheduled") throw new Error("请先取消本地定时，再更换账号");
     allowed.accountId = getAccount(existing.platform, patch.accountId).id;
@@ -205,7 +202,6 @@ export async function prepareDraft(draftId: string, interactive = true) {
 
   const outputFolder = path.join(getAppPaths().exports, draft.id);
   await fs.mkdir(outputFolder, { recursive: true });
-  const size = PLATFORM_SIZES[draft.platform];
   const files: string[] = [];
 
   for (let index = 0; index < draft.imageIds.length; index++) {
@@ -221,16 +217,7 @@ export async function prepareDraft(draftId: string, interactive = true) {
       continue;
     }
     const outputName = `${String(index + 1).padStart(2, "0")}-${path.parse(image.fileName).name.replace(/[^\w-]/g, "_")}.jpg`;
-    await sharp(image.originalPath)
-      .rotate()
-      .resize(size.width, size.height, {
-        fit: "inside",
-        withoutEnlargement: true,
-        background: "#ffffff"
-      })
-      .flatten({ background: "#ffffff" })
-      .jpeg({ quality: 90, mozjpeg: true })
-      .toFile(path.join(outputFolder, outputName));
+    await fs.writeFile(path.join(outputFolder, outputName), await renderPublishImage(image.originalPath, draft.platform));
     files.push(path.join(outputFolder, outputName));
   }
 
