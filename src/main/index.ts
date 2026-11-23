@@ -1,3 +1,4 @@
+import { canEditCopy } from "../shared/draft-copy";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
 import path from "node:path";
 import fsSync from "node:fs";
@@ -8,7 +9,7 @@ import { saveVolcKeys, clearVolcKeys, loadEditImage } from "./image-generation";
 import { backendLogin, backendRegister, backendLogout, backendAccount, backendCheckin, generateImage, resumeImageTask, discardImageTask, getGeneratedImage, saveGeneratedImage } from "./backend-service";
 import { createDrafts, listDrafts, deleteDraft, deleteDrafts, deleteLocalScheduledDrafts, deletePublishRecords, updateDraft, prepareDraft, markPublished, scheduleDraft } from "./draft-service";
 import { getSettings } from "./settings-service";
-import { generateCaption, generateSharedCaption } from "./ai-service";
+import { previewCaption, generateCaption, generateSharedCaption } from "./ai-service";
 import type { CopyOptions, Platform } from "../shared/types";
 import { runDueScheduledDrafts, assertNotPublishing, getBrowserSettings, saveBrowserSettings, closePlatformBrowser, openPlatformBrowser, publishDrafts, cancelPublishBatch, getPublishBatch, resolvePublish, recoverPublishing, stopPublisher } from "./browser-publisher";
 
@@ -132,6 +133,21 @@ function registerIpc() {
     if (group) getStore().drafts.filter(d => d.copyGroupId === group).forEach(d => assertNotPublishing(d.id));
     return updateDraft(id, patch);
   });
+  handle("content:styles", () => getStore().settings.contentStyles || []);
+  handle("content:save-styles", async (_event, styles) => {
+    if (!Array.isArray(styles) || styles.length > 20 || styles.some(s => !s || ["name","language","tone","audience","brand","forbidden"].some(k => typeof s[k] !== "string" || s[k].length > 1000))) throw new Error("风格字段无效");
+    getStore().settings.contentStyles = styles.map(s => ({name:s.name,language:s.language,tone:s.tone,audience:s.audience,brand:s.brand,forbidden:s.forbidden})); await persistStore();
+  });
+  handle("content:assets", async (_event, ids, tags, favorite) => {
+    if (!Array.isArray(ids) || ids.length > 500 || ids.some(id => typeof id !== "string" || !findImage(id)) || !Array.isArray(tags) || tags.length > 30 || tags.some(t => typeof t !== "string" || t.length > 60) || typeof favorite !== "boolean") throw new Error("素材标签无效");
+    for (const id of ids) Object.assign(findImage(id)!, {tags:[...new Set(tags)],favorite}); await persistStore();
+  });
+  handle("content:plan", async (_event, ids, start, minutes) => {
+    if (!Array.isArray(ids) || !ids.length || ids.length > 100 || new Set(ids).size !== ids.length || typeof start !== "string" || !Number.isFinite(Date.parse(start)) || Date.parse(start) < Date.now()+300000 || !Number.isInteger(minutes) || minutes < 1 || minutes > 10080) throw new Error("请选择草稿、至少5分钟后的时间及有效间隔");
+    for (const id of ids) { assertNotPublishing(id); const d = findDraft(id); if (!d || !canEditCopy(d) || d.status === "local_scheduled") throw new Error("只能安排未提交草稿"); }
+    ids.forEach((id, i) => { const d = findDraft(id)!; d.publishAt = new Date(Date.parse(start)+i*minutes*60000).toISOString(); d.xScheduledAt = d.platform === "x" ? d.publishAt : null; d.updatedAt = new Date().toISOString(); }); await persistStore();
+  });
+  handle("drafts:preview-caption", (_event, id, input) => previewCaption(id, input));
   handle("drafts:generate", (_event, id: string) => { assertNotPublishing(id); return generateCaption(id); });
   handle("drafts:generate-shared", (_event, ids: string[]) => generateSharedCaption(ids));
   handle("drafts:prepare", (_event, id: string) => { assertNotPublishing(id); return prepareDraft(id); });

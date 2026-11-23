@@ -4,6 +4,11 @@ import type { PlatformDefaults, PlatformDefaultsMap } from "../shared/types";
 import type { BrowserSettings, CopyOptions, DraftPatch, Draft, ImageAsset, ImportResult, Platform, SettingsView, RunLog, LogSnapshot } from "../shared/types";
 
 const api = {
+  previewCaption: (id: string, input: import("../shared/backend").CaptionPreviewInput): Promise<string[]> => ipcRenderer.invoke("drafts:preview-caption", id, input),
+ getContentStyles: () => ipcRenderer.invoke("content:styles"),
+ saveContentStyles: (s: import("../shared/types").ContentStyle[]) => ipcRenderer.invoke("content:save-styles", s),
+ updateAssetMeta: (ids: string[], tags: string[], favorite: boolean) => ipcRenderer.invoke("content:assets", ids, tags, favorite),
+ planDrafts: (ids: string[], start: string, minutes: number) => ipcRenderer.invoke("content:plan", ids, start, minutes),
   backendLogin: (username: string, password: string): Promise<SettingsView> => ipcRenderer.invoke('backend:login', username, password),
   backendRegister: (username: string, password: string): Promise<SettingsView> => ipcRenderer.invoke('backend:register', username, password),
   backendLogout: (): Promise<SettingsView> => ipcRenderer.invoke('backend:logout'),

@@ -11,10 +11,14 @@ for(const [key, translations] of Object.entries(messages)) {
     assert.deepEqual(placeholders(text),placeholders(key),key);
   }
 }
-for(const name of ['App','CaptionEditor','ImageGenerator','PlatformSettings','PublishHistory','LocalSchedules','RunLogs','LanguageSelect']) {
+for(const name of ['ContentStudio','CaptionTools','App','CaptionEditor','ImageGenerator','PlatformSettings','PublishHistory','LocalSchedules','RunLogs','LanguageSelect']) {
   const source=fs.readFileSync(`src/renderer/src/${name}.tsx`,'utf8');
   const ast=ts.createSourceFile(name,source,99,true,ts.ScriptKind.TSX);
   function visit(node) {
+    if (['ContentStudio','CaptionTools'].includes(name)) {
+      if (ts.isJsxText(node)) assert.ok(!/[\u4e00-\u9fff]/.test(node.text), `Untranslated JSX in ${name}: ${node.text}`);
+      if (ts.isJsxAttribute(node) && node.initializer && ts.isStringLiteral(node.initializer)) assert.ok(!/[\u4e00-\u9fff]/.test(node.initializer.text), `Untranslated attribute in ${name}`);
+    }
     if(ts.isCallExpression(node)&&node.expression.getText(ast)==='t'&&ts.isStringLiteral(node.arguments[0])) assert.ok(messages[node.arguments[0].text],`Missing translation: ${node.arguments[0].text}`);
     ts.forEachChild(node,visit);
   }

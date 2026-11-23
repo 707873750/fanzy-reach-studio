@@ -171,3 +171,12 @@ uv run pywrangler dev --local --port 8788 --inspector-port 9239 --persist-to .lo
 
 当前支持用户名密码注册和独立账户，不包含找回密码、邮箱验证、充值或会员系统。
 公开运营前还需注册验证、总消费预算和异常任务对账。
+
+### 文案预览操作
+
+`/api/captions` 保留原有请求格式，新增可选 `action`：
+- `variants`：传入 `text`（可为空），图片仍为1–35张；一次上游调用返回 `candidates` 三个不同正文字符串，同时兼容返回首条 `caption`。
+- `translate`：传入非空 `text` 和1–80字符的 `language`；允许 `images: []`。
+- `shorten`：传入非空 `text` 和10–5000之间的整数 `maxLength`；允许 `images: []`。返回正文需严格短于原文且不超过目标长度。
+
+原文最多5000字符，继续使用登录鉴权、频率限制和脱敏错误。桌面预览操作不写入草稿；采用后由用户保存。验证：`python -m unittest discover -s tests -p test_caption_preview.py`，桌面在构建后运行 `node tests/caption-preview.test.mjs` 和 `electron tests/caption-preview-desktop.cjs`。均不调用付费供应商。

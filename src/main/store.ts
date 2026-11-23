@@ -14,6 +14,7 @@ export interface StoreData {
   images: StoredImage[];
   drafts: StoredDraft[];
   settings: {
+    contentStyles?: import("../shared/types").ContentStyle[];
     backendUrl?: string;
     backendTokenEncrypted?: string;
     backendUserId?: string;

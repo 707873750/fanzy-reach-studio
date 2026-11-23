@@ -1,4 +1,15 @@
+export interface CaptionPreviewInput {
+  action: "variants" | "translate" | "shorten";
+  text: string;
+  language?: string;
+  maxLength?: number;
+}
 export interface CaptionRequest {
+  action?: CaptionPreviewInput["action"];
+  text?: string;
+  language?: string;
+  maxLength?: number;
+ style?: import("./types").ContentStyle;
   images: string[];
   platforms: import('./types').Platform[];
   shared: boolean;
@@ -6,6 +17,7 @@ export interface CaptionRequest {
 }
 
 export interface CaptionResult {
+  candidates?: string[];
   caption: string;
   title?: string;
   hashtags?: string[];

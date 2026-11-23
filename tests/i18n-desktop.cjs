@@ -41,10 +41,10 @@ if (process.type === 'renderer') {
         await changeLanguage(language);
         assert.equal(await run(`document.querySelector('#shared-caption').textContent`),'用户文案 日本語 한국어 English');
         for(let page=0;page<6;page++) {
-          await run(`document.querySelectorAll('.nav-item')[${page}].click()`);
+          await run(`document.querySelectorAll('.nav-item')[${page+1}].click()`);
           await waitFor(`document.querySelector('h1')?.textContent === ${JSON.stringify(headings[language][page])}`);
         }
-        await run(`document.querySelectorAll('.nav-item')[0].click()`);
+        await run(`document.querySelectorAll('.nav-item')[1].click()`);
         await waitFor(`!!document.querySelector('#shared-caption')`);
         assert.equal(await run(`document.querySelector('#shared-caption').textContent`),'用户文案 日本語 한국어 English');
         assert.equal(await run(`document.querySelector('.language-select select').getAttribute('aria-label')`), {en:'Interface language',ja:'表示言語',ko:'화면 언어'}[language]);

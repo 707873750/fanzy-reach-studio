@@ -19,9 +19,11 @@ import PlatformSettings from "./PlatformSettings";
 import ImageGenerator, { ImageGenerationSettings } from "./ImageGenerator";
 import PublishHistory from "./PublishHistory";
 import LocalSchedules from "./LocalSchedules";
+import ContentStudio from "./ContentStudio";
+import CaptionTools from "./CaptionTools";
 import CaptionEditor from "./CaptionEditor";
 
-type Page = "library" | "queue" | "schedules" | "history" | "settings" | "logs";
+type Page = "studio" | "library" | "queue" | "schedules" | "history" | "settings" | "logs";
 
 const PLATFORM_META: Record<Platform, { label: string; url: string; icon: typeof Instagram; color: string }> = {
   facebook: { label: "Facebook", url: "https://www.facebook.com/", icon: Facebook, color: "#1877F2" },
@@ -365,6 +367,7 @@ function App() {
           <div><strong>FANZY REACH</strong><span>{t("工作室")}</span></div>
         </div>
         <div className="workspace-label">{t("工作空间")}</div>
+        <button className={`nav-item ${page === "studio" ? "active" : ""}`} onClick={() => setPage("studio")}><CalendarClock size={17}/> {t("内容工作台")}</button>
         <button className={`nav-item ${page === "library" ? "active" : ""}`} onClick={() => setPage("library")}>
           <LayoutDashboard size={17}/> {t("素材库")}</button>
         <button className={`nav-item ${page === "queue" ? "active" : ""}`} onClick={() => setPage("queue")}>
@@ -400,7 +403,7 @@ function App() {
 
       <main className="main">
         <header className="topbar">
-          <div className="breadcrumbs">{t("工作空间")}<span>/</span> {page === "library" ? t("素材库") : page === "queue" ? t("发布队列") : page === "schedules" ? t("本地定时任务") : page === "history" ? t("发布记录") : page === "logs" ? t("运行日志") : t("设置")}</div>
+          <div className="breadcrumbs">{t("工作空间")}<span>/</span> {page === "studio" ? t("内容工作台") : page === "library" ? t("素材库") : page === "queue" ? t("发布队列") : page === "schedules" ? t("本地定时任务") : page === "history" ? t("发布记录") : page === "logs" ? t("运行日志") : t("设置")}</div>
           <div className="top-actions">
             <LanguageSelect />
             <span className="online-dot"/> {t("本地工作空间")}<div className="avatar">FR</div>
@@ -420,6 +423,7 @@ function App() {
             finally { setCancellingPublish(false); }
           }}>{cancellingPublish ? t("正在停止…") : t("停止本次发布")}</button></div>}
 
+          {page === "studio" && <ContentStudio images={images} drafts={drafts} refresh={async()=>{setImages(await window.reach.listImages());setDrafts(await window.reach.listDrafts());}}/>}
           {page === "logs" && <RunLogs draftId={logDraftId}/> }
           {page === "schedules" && <LocalSchedules tasks={localSchedules} images={images} platforms={PLATFORM_META} busy={busy} isLocked={draftLocked}
             onDelete={ids => runBusy(t("正在删除本地定时任务…"), async () => {
@@ -630,6 +634,7 @@ function App() {
                         {selectedDraft.copyGroupId && <><label htmlFor="draft-copy-mode">{t("文案方式")}</label><select id="draft-copy-mode" disabled={detailBusy || !canEditCopy(selectedDraft)} value={selectedDraft.captionMode || "independent"} onChange={e=>switchCaptionMode(e.target.value as "shared" | "independent")}><option value="shared">{t("使用统一文案")}</option><option value="independent">{t("使用独立文案")}</option></select><p className="muted">{selectedDraft.captionMode === "shared" ? t("保存正文将同步本批次中使用统一文案的 {0} 条可编辑草稿。已发布、已排程及结果待确认的草稿不受影响。", [drafts.filter(d=>d.copyGroupId===selectedDraft.copyGroupId && d.captionMode==="shared" && canEditCopy(d)).length]) : t("仅修改当前草稿；切换为统一文案时会保留独立版本。")}</p></>}
                         <div className="label-row"><label htmlFor="draft-caption">{t("正文文案")}</label><button className="text-button" onClick={generateCaption} disabled={detailBusy || !canEditCopy(selectedDraft) || !settings.backendLoggedIn}><Sparkles size={14}/> {t("AI 生成独立文案")}</button></div>
                         <p className="muted">{t("AI 生成将使用当前平台的独立文案。标题、话题标签、图片说明、图板和定时时间始终分别设置。")}</p>
+                        <CaptionTools key={"tools-" + selectedDraft.id + selectedDraft.captionMode} draftId={selectedDraft.id} revision={selectedDraft.updatedAt} value={caption} disabled={detailBusy || !canEditCopy(selectedDraft) || !settings.backendLoggedIn} shared={selectedDraft.captionMode === "shared"} onApply={text=>{setCaption(text);setCaptionHtml(undefined);}}/>
                         <CaptionEditor key={selectedDraft.id + selectedDraft.captionMode} id="draft-caption" maxLength={5000} disabled={detailBusy || !canEditCopy(selectedDraft)} rows={6} value={caption} html={captionHtml} onChange={(value,html)=>{setCaption(value);setCaptionHtml(html);}} placeholder={t("输入文案，或使用 AI 生成…")}/>
                       </div>
                       <div className="field">

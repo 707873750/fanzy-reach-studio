@@ -2131,4 +2131,163 @@
     "対応範囲：最大4時間、1 GB。新方式では Reels として公開します。画面と権限はプラットフォームによります。",
     "앱 지원: 최대 4시간, 1 GB. 새 동영상은 Reels로 게시되며 메뉴와 권한은 플랫폼 기준입니다."
   ]
+,
+  "内容工作台": ["Content studio", "コンテンツスタジオ", "콘텐츠 스튜디오"]
+,
+  "AI 文案助手": ["AI writing assistant", "AI 文章アシスタント", "AI 문구 도우미"]
+,
+  "生成三个候选": ["Generate three options", "3つの候補を生成", "후보 3개 생성"]
+,
+  "目标语言": ["Target language", "翻訳先の言語", "대상 언어"]
+,
+  "翻译目标语言": ["Translation language", "翻訳先の言語", "번역 대상 언어"]
+,
+  "翻译": ["Translate", "翻訳", "번역"]
+,
+  "最多字符": ["Character limit", "文字数上限", "최대 글자 수"]
+,
+  "缩短目标字符数": ["Target character limit", "短縮後の文字数上限", "축약 목표 글자 수"]
+,
+  "缩短": ["Shorten", "短くする", "줄이기"]
+,
+  "基于当前编辑内容预览，仅替换正文；采用后请保存修改。": ["Preview uses your current text and replaces only the caption. Save after applying.", "編集中の文章を使ってプレビューし、本文のみ置き換えます。適用後に保存してください。", "현재 편집 내용을 미리 보고 본문만 교체합니다. 적용 후 저장하세요."]
+,
+  "保存将按现有统一文案规则同步关联草稿。": ["Saving syncs linked drafts using the shared caption rules.", "保存すると共通文章のルールに従って関連下書きに同期します。", "저장하면 공통 문구 규칙에 따라 연결된 초안에 동기화됩니다."]
+,
+  "标题、标签和图片说明保持不变。": ["Titles, hashtags and image descriptions stay unchanged.", "タイトル、タグ、画像の説明は変更されません。", "제목, 태그 및 이미지 설명은 유지됩니다."]
+,
+  "正在生成预览…": ["Generating preview…", "プレビューを生成中…", "미리보기 생성 중…"]
+,
+  "取消等待": ["Stop waiting", "待機をやめる", "대기 취소"]
+,
+  "候选 {0}": ["Option {0}", "候補 {0}", "후보 {0}"]
+,
+  "预览结果": ["Preview result", "プレビュー結果", "미리보기 결과"]
+,
+  "{0} 字符": ["{0} characters", "{0} 文字", "{0}자"]
+,
+  "采用此文案": ["Use this caption", "この文章を使用", "이 문구 사용"]
+,
+  "放弃预览": ["Discard preview", "プレビューを破棄", "미리보기 취소"]
+,
+  "AI 文案风格": ["AI writing styles", "AI 文章スタイル", "AI 문구 스타일"]
+,
+  "保存并启用后，发布队列中的独立和统一 AI 文案都会采用此风格。": ["Save and activate a style to use it for independent and shared AI captions.", "保存して有効にすると、個別・共通の AI 文章にこのスタイルを適用します。", "저장하고 활성화하면 개별 및 공통 AI 문구에 이 스타일이 적용됩니다."]
+,
+  "日常分享": ["Everyday moments", "日常の共有", "일상 공유"]
+,
+  "产品介绍": ["Product introduction", "商品紹介", "제품 소개"]
+,
+  "教程科普": ["Tips and explainers", "解説・チュートリアル", "팁과 설명"]
+,
+  "自然、第一人称": ["Natural, first person", "自然な一人称", "자연스러운 1인칭"]
+,
+  "关注者": ["Followers", "フォロワー", "팔로워"]
+,
+  "清晰介绍已提供的产品特点，不虚构功效": ["Explain supplied product features clearly without invented benefits", "提供された商品の特徴を明確に説明し、効果を捏造しない", "제공된 제품 특징을 명확히 설명하고 효능을 지어내지 않기"]
+,
+  "清晰、有条理、易理解": ["Clear, structured and accessible", "明確で整理され、わかりやすい", "명확하고 체계적이며 이해하기 쉬운"]
+,
+  "风格模板": ["Style template", "スタイルテンプレート", "스타일 템플릿"]
+,
+  "新建模板": ["New template", "新しいテンプレート", "새 템플릿"]
+,
+  "当前启用": ["Active", "使用中", "사용 중"]
+,
+  "模板名称": ["Template name", "テンプレート名", "템플릿 이름"]
+,
+  "输出语言": ["Output language", "出力言語", "출력 언어"]
+,
+  "语气": ["Tone", "トーン", "어조"]
+,
+  "目标受众": ["Audience", "対象読者", "대상 독자"]
+,
+  "品牌介绍": ["Brand description", "ブランド紹介", "브랜드 소개"]
+,
+  "禁用词": ["Words to avoid", "使用しない語句", "제외할 단어"]
+,
+  "保存并启用": ["Save and activate", "保存して有効にする", "저장 및 활성화"]
+,
+  "恢复默认风格": ["Reset styles", "既定のスタイルに戻す", "기본 스타일 복원"]
+,
+  "素材复用管理": ["Asset reuse", "素材の再利用", "소재 재사용"]
+,
+  "搜索名称或标签": ["Search names or tags", "名前やタグで検索", "이름 또는 태그 검색"]
+,
+  "只看收藏": ["Favorites only", "お気に入りのみ", "즐겨찾기만"]
+,
+  "全部发布状态": ["All publishing states", "すべての公開状況", "모든 게시 상태"]
+,
+  "尚未发布到 {0}": ["Not yet posted to {0}", "{0} に未投稿", "{0}에 아직 게시하지 않음"]
+,
+  "标签 / 主题集合，以逗号分隔": ["Tags / collections, comma-separated", "タグ・コレクション（カンマ区切り）", "태그 / 모음, 쉼표로 구분"]
+,
+  "保存标签并收藏所选": ["Save tags and favorite", "タグを保存してお気に入りに追加", "태그 저장 및 즐겨찾기 추가"]
+,
+  "保存标签并取消收藏": ["Save tags and unfavorite", "タグを保存してお気に入りを解除", "태그 저장 및 즐겨찾기 해제"]
+,
+  "已发布：{0} · 最近 {1}": ["Posted: {0} · Last used {1}", "投稿済み：{0} · 最終使用 {1}", "게시됨: {0} · 최근 사용 {1}"]
+,
+  "尚未发布": ["Not yet posted", "未投稿", "아직 게시하지 않음"]
+,
+  "内容日历": ["Content calendar", "コンテンツカレンダー", "콘텐츠 캘린더"]
+,
+  "本机时区：{0}。排期仅保存计划，请到发布队列提交；平台已排程和本地待执行任务不可拖动。": ["Time zone: {0}. Plans must be submitted from the publishing queue. Submitted schedules cannot be dragged.", "タイムゾーン：{0}。予定は投稿キューから送信してください。送信済みの予定はドラッグできません。", "시간대: {0}. 계획은 게시 대기열에서 제출하세요. 제출된 예약은 드래그할 수 없습니다."]
+,
+  "今天": ["Today", "今日", "오늘"]
+,
+  "切换月视图": ["Month view", "月表示", "월 보기"]
+,
+  "切换周视图": ["Week view", "週表示", "주 보기"]
+,
+  "本地待执行": ["Waiting locally", "ローカル実行待ち", "로컬 실행 대기"]
+,
+  "待提交计划": ["Unsubmitted plan", "未送信の予定", "미제출 계획"]
+,
+  "批量安排草稿": ["Schedule drafts in bulk", "下書きを一括予定", "초안 일괄 예약"]
+,
+  "开始时间": ["Start time", "開始日時", "시작 시간"]
+,
+  "间隔（分钟）": ["Interval (minutes)", "間隔（分）", "간격(분)"]
+,
+  "按勾选顺序保存排期（{0}）": ["Save schedule in selection order ({0})", "選択順に予定を保存（{0}）", "선택 순서로 예약 저장({0})"]
+,
+  "已保存": ["Saved", "保存しました", "저장됨"]
+,
+  "风格字段无效": ["Invalid style fields", "スタイルの入力が無効です", "스타일 입력이 잘못되었습니다"]
+,
+  "素材标签无效": ["Invalid asset tags", "素材タグが無効です", "소재 태그가 잘못되었습니다"]
+,
+  "请选择草稿、至少5分钟后的时间及有效间隔": ["Select drafts, a time at least 5 minutes ahead and a valid interval", "下書き、5分以上先の日時、有効な間隔を選択してください", "초안, 최소 5분 이후 시간 및 올바른 간격을 선택하세요"]
+,
+  "只能安排未提交草稿": ["Only unsubmitted drafts can be scheduled", "未送信の下書きのみ予定できます", "미제출 초안만 예약할 수 있습니다"]
+,
+  "请检查原文、目标语言和长度（10–5000字符）": ["Check the source, target language and length (10–5000 characters)", "原文、翻訳先の言語、文字数（10～5000）を確認してください", "원문, 대상 언어 및 길이(10–5000자)를 확인하세요"]
+,
+  "当前草稿不可编辑": ["This draft cannot be edited", "この下書きは編集できません", "이 초안은 편집할 수 없습니다"]
+,
+  "每次最多35张素材": ["Up to 35 assets per request", "1回につき素材は35件までです", "요청당 최대 35개 소재"]
+,
+  "素材已不存在": ["An asset is no longer available", "素材が見つかりません", "소재가 더 이상 존재하지 않습니다"]
+,
+  "生成期间草稿已改变，请重新生成": ["The draft changed during generation. Please try again.", "生成中に下書きが変更されました。再生成してください", "생성 중 초안이 변경되었습니다. 다시 생성하세요"]
+,
+  "AI 结果无效或未达到缩短要求，原文保留": ["Invalid AI result or shortening target not met. Original text kept.", "AI の結果が無効か短縮条件を満たしていません。原文は保持されます", "AI 결과가 잘못되었거나 축약 조건을 충족하지 못했습니다. 원문은 유지됩니다"]
+,
+  "{0} 条任务": ["{0} posts", "{0} 件の投稿", "게시물 {0}개"]
+,
+  "另有 {0} 条": ["+{0} more", "ほか {0} 件", "외 {0}개"]
+,
+  "当天暂无任务": ["No posts for this day", "この日の投稿はありません", "이 날짜에 게시물이 없습니다"]
+,
+  "选择日期查看完整任务": ["Select a day to see all posts", "日付を選ぶと全投稿を表示します", "날짜를 선택하면 모든 게시물이 표시됩니다"]
+,
+  "当天任务": ["Posts for this day", "この日の投稿", "선택한 날짜의 게시물"]
+,
+  "周视图": ["Week", "週", "주"]
+,
+  "月视图": ["Month", "月", "월"]
+,
+  "上一页": ["Previous", "前へ", "이전"],
+  "下一页": ["Next", "次へ", "다음"]
 }

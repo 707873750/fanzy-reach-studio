@@ -36,6 +36,8 @@ export interface ImageAsset {
   id: string;
   fileName: string;
   sourceFolders?: string[];
+  tags?: string[];
+  favorite?: boolean;
   video?: { duration: number; fps: number; codec: string; audioCodec?: string; pixelFormat: string };
   mimeType: string;
   width: number;
@@ -92,7 +94,13 @@ export interface CreateDraftResult {
   drafts: Draft[];
 }
 
+export interface ContentStyle { name: string; language: string; tone: string; audience: string; brand: string; forbidden: string; }
 export interface ReachApi {
+  previewCaption: (id: string, input: import("./backend").CaptionPreviewInput) => Promise<string[]>;
+ getContentStyles: () => Promise<ContentStyle[]>;
+ saveContentStyles: (styles: ContentStyle[]) => Promise<void>;
+ updateAssetMeta: (ids: string[], tags: string[], favorite: boolean) => Promise<void>;
+ planDrafts: (ids: string[], start: string, minutes: number) => Promise<void>;
   backendLogin: (username: string, password: string) => Promise<SettingsView>;
   backendRegister: (username: string, password: string) => Promise<SettingsView>;
   backendLogout: () => Promise<SettingsView>;
