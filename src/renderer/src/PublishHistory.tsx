@@ -1,3 +1,6 @@
+import { accountLabel } from "./Accounts";
+import type { PlatformAccount } from "../../shared/types";
+import { defaultAccountId } from "../../shared/accounts";
 import { t, useLanguage } from "./i18n";
 import { formatDate } from "./i18n";
 import { useEffect, useState } from "react";
@@ -11,7 +14,8 @@ function recordStatus(record: Draft) {
   return record.status === "platform_scheduled" || record.browserPublish?.state === "scheduled" ? t("平台已排程") : t("已发布");
 }
 
-export default function PublishHistory({ records, images, platforms, busy, isLocked, onDelete, onLogs }: {
+export default function PublishHistory({ accounts = [], records, images, platforms, busy, isLocked, onDelete, onLogs }: {
+  accounts?: PlatformAccount[];
   records: Draft[];
   images: ImageAsset[];
   platforms: Record<Platform, { label: string }>;
@@ -21,6 +25,7 @@ export default function PublishHistory({ records, images, platforms, busy, isLoc
   onLogs: (id: string) => void;
 }) {
   useLanguage();
+  const accountName=(d:Draft)=>accountLabel(accounts.find(a=>a.id===(d.accountId||defaultAccountId(d.platform))));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
   const [pendingIds, setPendingIds] = useState<string[] | null>(null);
@@ -63,12 +68,12 @@ export default function PublishHistory({ records, images, platforms, busy, isLoc
         </div>
         {records.map(record => <div key={record.id} className="draft-select-row"><input type="checkbox" aria-label={t("选择 {0} 发布记录 {1}", [platforms[record.platform].label, record.id])} checked={checkedIds.includes(record.id)} disabled={busy || !canDeletePublishRecord(record) || isLocked(record)} onChange={event => { setPendingIds(null); setCheckedIds(old => event.target.checked ? [...old, record.id] : old.filter(id => id !== record.id)); }}/><button className={`draft-row ${selected.id === record.id ? "selected" : ""}`} onClick={() => setSelectedId(record.id)}>
           <div className="platform-icon"><CheckCircle2 size={18}/></div>
-          <div className="draft-row-main"><strong>{platforms[record.platform].label}</strong><span>{t("{0} 项素材 · {1}", [record.imageIds.length, recordStatus(record)])}</span><span>{formatDate(record.updatedAt)}</span></div>
+          <div className="draft-row-main"><strong>{platforms[record.platform].label} · {accountName(record)}</strong><span>{t("{0} 项素材 · {1}", [record.imageIds.length, recordStatus(record)])}</span><span>{formatDate(record.updatedAt)}</span></div>
           <span className={`status-dot ${record.status !== "platform_scheduled" && record.browserPublish?.state !== "scheduled" ? "published" : "scheduled"}`}/>
         </button></div>)}
       </section>
       <section className="panel draft-detail">
-        <div className="detail-heading"><div><div className="eyebrow">{t("发布记录")}</div><h2>{platforms[selected.platform].label}</h2><p>{t("{0} · {1} 项素材", [recordStatus(selected), selected.imageIds.length])}</p></div><div className="heading-actions"><button className="text-button" onClick={() => onLogs(selected.id)}>{t("查看任务日志")}</button><button className="icon-button danger" title={t("删除当前发布记录")} aria-label={t("删除当前发布记录")} disabled={busy || !canDeletePublishRecord(selected) || isLocked(selected)} onClick={() => setPendingIds([selected.id])}><Trash2 size={17}/></button></div></div>
+        <div className="detail-heading"><div><div className="eyebrow">{t("发布记录")}</div><h2>{platforms[selected.platform].label} · {accountName(selected)}</h2><p>{t("{0} · {1} 项素材", [recordStatus(selected), selected.imageIds.length])}</p></div><div className="heading-actions"><button className="text-button" onClick={() => onLogs(selected.id)}>{t("查看任务日志")}</button><button className="icon-button danger" title={t("删除当前发布记录")} aria-label={t("删除当前发布记录")} disabled={busy || !canDeletePublishRecord(selected) || isLocked(selected)} onClick={() => setPendingIds([selected.id])}><Trash2 size={17}/></button></div></div>
         <p className="muted">{t("记录更新时间：{0}", [formatDate(selected.updatedAt)])}</p>
         {(selected.publishAt || selected.xScheduledAt) && <p className="muted">{selected.scheduleMode === "local" ? t("本地计划时间") : t("平台排程时间")}：{formatDate((selected.publishAt || selected.xScheduledAt)!)}</p>}
         {selected.browserPublish?.message && <p className="muted">{selected.browserPublish.message}</p>}

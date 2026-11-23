@@ -4,6 +4,10 @@ import type { PlatformDefaults, PlatformDefaultsMap } from "../shared/types";
 import type { BrowserSettings, CopyOptions, DraftPatch, Draft, ImageAsset, ImportResult, Platform, SettingsView, RunLog, LogSnapshot } from "../shared/types";
 
 const api = {
+  listAccounts: () => ipcRenderer.invoke("accounts:list"),
+  addAccount: (platform: Platform, name: string) => ipcRenderer.invoke("accounts:add", platform, name),
+  deleteAccount: (id: string) => ipcRenderer.invoke("accounts:delete", id),
+  renameAccount: (id: string, name: string) => ipcRenderer.invoke("accounts:rename", id, name),
   previewCaption: (id: string, input: import("../shared/backend").CaptionPreviewInput): Promise<string[]> => ipcRenderer.invoke("drafts:preview-caption", id, input),
  getContentStyles: () => ipcRenderer.invoke("content:styles"),
  saveContentStyles: (s: import("../shared/types").ContentStyle[]) => ipcRenderer.invoke("content:save-styles", s),
@@ -35,8 +39,8 @@ const api = {
   },
   getBrowserSettings: (): Promise<BrowserSettings> => ipcRenderer.invoke("browser:settings"),
   saveBrowserSettings: (settings: BrowserSettings): Promise<BrowserSettings> => ipcRenderer.invoke("browser:settings-save", settings),
-  closePlatformBrowser: (platform: Platform): Promise<void> => ipcRenderer.invoke("browser:close", platform),
-  openPlatformBrowser: (platform: Platform, viewOnly = false): Promise<void> => ipcRenderer.invoke("browser:open", platform, viewOnly),
+  closePlatformBrowser: (platform: Platform, accountId?: string): Promise<void> => ipcRenderer.invoke("browser:close", platform, accountId),
+  openPlatformBrowser: (platform: Platform, viewOnly = false, accountId?: string): Promise<void> => ipcRenderer.invoke("browser:open", platform, viewOnly, accountId),
   publishDrafts: (ids: string[]): Promise<Draft[]> => ipcRenderer.invoke("browser:publish", ids),
   cancelPublishBatch: (): Promise<void> => ipcRenderer.invoke("browser:cancel-publish"),
   getPublishBatch: (): Promise<string[]> => ipcRenderer.invoke("browser:publish-batch"),
@@ -60,8 +64,8 @@ const api = {
   deleteImage: (id: string): Promise<void> =>
     ipcRenderer.invoke("images:delete", id),
   previewMedia: (id: string): Promise<void> => ipcRenderer.invoke("images:preview", id),
-  createDrafts: (ids: string[], platforms: Platform[], copy?: CopyOptions): Promise<Draft[]> =>
-    ipcRenderer.invoke("drafts:create", ids, platforms, copy),
+  createDrafts: (ids: string[], platforms: Platform[], copy?: CopyOptions, accountIds?: string[]): Promise<Draft[]> =>
+    ipcRenderer.invoke("drafts:create", ids, platforms, copy, accountIds),
   listDrafts: (): Promise<Draft[]> =>
     ipcRenderer.invoke("drafts:list"),
   deleteDraft: (id: string): Promise<void> =>

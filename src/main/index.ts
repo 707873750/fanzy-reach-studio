@@ -1,3 +1,4 @@
+import { listAccounts, addAccount, renameAccount, deleteAccount } from "./accounts";
 import { canEditCopy } from "../shared/draft-copy";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell } from "electron";
 import path from "node:path";
@@ -64,10 +65,14 @@ function registerIpc() {
     const error = await shell.openPath(snapshot.directory);
     if (error) throw new Error(error);
   });
+  handle("accounts:list", () => listAccounts());
+  handle("accounts:add", (_event, platform, name) => addAccount(platform, name));
+  handle("accounts:delete", (_event, id: string) => deleteAccount(id));
+  handle("accounts:rename", (_event, id, name) => renameAccount(id, name));
   handle("browser:settings", () => getBrowserSettings());
   handle("browser:settings-save", (_event, settings) => saveBrowserSettings(settings));
-  handle("browser:close", (_event, platform: Platform) => closePlatformBrowser(platform));
-  handle("browser:open", (_event, platform: Platform, viewOnly: unknown) => openPlatformBrowser(platform, viewOnly === true));
+  handle("browser:close", (_event, platform: Platform, accountId?: string) => closePlatformBrowser(platform, accountId));
+  handle("browser:open", (_event, platform: Platform, viewOnly: unknown, accountId?: string) => openPlatformBrowser(platform, viewOnly === true, accountId));
   handle("browser:publish", (_event, ids: string[]) => publishDrafts(ids));
   handle("browser:cancel-publish", () => cancelPublishBatch());
   handle("browser:publish-batch", () => getPublishBatch());
@@ -103,12 +108,12 @@ function registerIpc() {
     if (error) throw new Error(error);
   });
 
-  handle("drafts:create", (_event, imageIds: string[], platforms: Platform[], copy?: CopyOptions) => {
+  handle("drafts:create", (_event, imageIds: string[], platforms: Platform[], copy?: CopyOptions, accountIds?: string[]) => {
     const allowed = ["instagram", "x", "pinterest", "tiktok", "bluesky", "facebook"];
     if (!Array.isArray(imageIds) || !Array.isArray(platforms) || platforms.some((p) => !allowed.includes(p))) {
       throw new Error("无效的草稿请求");
     }
-    return createDrafts(imageIds, platforms, copy);
+    return createDrafts(imageIds, platforms, copy, accountIds);
   });
   handle("drafts:list", () => listDrafts());
   handle("history:delete", (_event, ids: string[]) => {

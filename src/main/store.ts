@@ -1,3 +1,4 @@
+import { migrateAccounts } from "../shared/accounts";
 import { app } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -11,6 +12,7 @@ export interface StoredImage extends ImageAsset {
 export interface StoredDraft extends Draft {}
 
 export interface StoreData {
+  accounts?: import("../shared/types").PlatformAccount[];
   images: StoredImage[];
   drafts: StoredDraft[];
   settings: {
@@ -56,13 +58,18 @@ export async function initStore() {
   try {
     const raw = await fs.readFile(storeFile, "utf8");
     data = JSON.parse(raw) as StoreData;
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     data = { images: [], drafts: [], settings: {} };
     await persistStore();
   }
   data.images ??= [];
   data.drafts ??= [];
   data.settings ??= {};
+  if (migrateAccounts(data)) {
+    await fs.copyFile(storeFile, `${storeFile}.before-multi-account.json`, (await import("node:fs")).constants.COPYFILE_EXCL).catch(error => { if (error.code !== "EEXIST") throw error; });
+    await persistStore();
+  }
   if ("zhipuKeyEncrypted" in data.settings) {
     delete data.settings.zhipuKeyEncrypted;
     await persistStore();

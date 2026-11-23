@@ -1,5 +1,6 @@
 import type { GenerateImageRequest, GeneratedImagePreview, EditImageUpload } from "./image-generation";
 export type Platform = "instagram" | "x" | "pinterest" | "tiktok" | "bluesky" | "facebook";
+export interface PlatformAccount { id: string; platform: Platform; name: string; legacy?: boolean; sessionSavedAt?: string; deletedAt?: string; }
 export interface PlatformDefaults {
   imagesPerDraft: number;
   tiktokPrivacy?: "public" | "self_only";
@@ -14,7 +15,7 @@ export interface CopyOptions {
   sharedCaptionHtml?: string;
   platforms: Partial<Record<Platform, { mode: "shared" | "independent"; caption: string; captionHtml?: string }>>;
 }
-export type DraftPatch = Partial<Pick<Draft, "title" | "caption" | "captionHtml" | "altText" | "hashtags" | "boardName" | "xScheduledAt" | "publishAt" | "captionMode" | "tiktokPrivacy">>;
+export type DraftPatch = Partial<Pick<Draft, "accountId" | "title" | "caption" | "captionHtml" | "altText" | "hashtags" | "boardName" | "xScheduledAt" | "publishAt" | "captionMode" | "tiktokPrivacy">>;
 export interface BrowserSettings { showBrowser: boolean; channel: "msedge" | "chrome" | "chromium"; }
 export interface RunLog {
   id: string;
@@ -49,6 +50,7 @@ export interface ImageAsset {
 }
 
 export interface Draft {
+  accountId?: string;
   id: string;
   platform: Platform;
   imageIds: string[];
@@ -96,6 +98,10 @@ export interface CreateDraftResult {
 
 export interface ContentStyle { name: string; language: string; tone: string; audience: string; brand: string; forbidden: string; }
 export interface ReachApi {
+  listAccounts: () => Promise<PlatformAccount[]>;
+  addAccount: (platform: Platform, name: string) => Promise<PlatformAccount>;
+  deleteAccount: (id: string) => Promise<void>;
+  renameAccount: (id: string, name: string) => Promise<void>;
   previewCaption: (id: string, input: import("./backend").CaptionPreviewInput) => Promise<string[]>;
  getContentStyles: () => Promise<ContentStyle[]>;
  saveContentStyles: (styles: ContentStyle[]) => Promise<void>;
@@ -124,8 +130,8 @@ export interface ReachApi {
   copyText: (text: string) => Promise<boolean>;
   getBrowserSettings: () => Promise<BrowserSettings>;
   saveBrowserSettings: (settings: BrowserSettings) => Promise<BrowserSettings>;
-  closePlatformBrowser: (platform: Platform) => Promise<void>;
-  openPlatformBrowser: (platform: Platform, viewOnly?: boolean) => Promise<void>;
+  closePlatformBrowser: (platform: Platform, accountId?: string) => Promise<void>;
+  openPlatformBrowser: (platform: Platform, viewOnly?: boolean, accountId?: string) => Promise<void>;
   publishDrafts: (ids: string[]) => Promise<Draft[]>;
   cancelPublishBatch: () => Promise<void>;
   getPublishBatch: () => Promise<string[]>;
@@ -137,7 +143,7 @@ export interface ReachApi {
   listImages: () => Promise<ImageAsset[]>;
   deleteImage: (imageId: string) => Promise<void>;
   previewMedia: (id: string) => Promise<void>;
-  createDrafts: (imageIds: string[], platforms: Platform[], copy?: CopyOptions) => Promise<Draft[]>;
+  createDrafts: (imageIds: string[], platforms: Platform[], copy?: CopyOptions, accountIds?: string[]) => Promise<Draft[]>;
   listDrafts: () => Promise<Draft[]>;
   deleteDraft: (draftId: string) => Promise<void>;
   deleteDrafts: (draftIds: string[]) => Promise<number>;

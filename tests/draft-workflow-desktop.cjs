@@ -9,6 +9,7 @@ if (process.type === 'renderer') {
     deleted:[], deletedRecords:[], failRecordDelete:false, progress:()=>{}
   };
   window.reach = {
+    listAccounts:async()=>['instagram','x','pinterest','tiktok','bluesky','facebook'].map(platform=>({id:`default-${platform}`,platform,name:'',legacy:true})),
     listImages:async()=>structuredClone(fixture.images), listDrafts:async()=>structuredClone(fixture.drafts),
     deleteImage:async id=>{if(id==='blocked' && fixture.imageBlocked) throw Error('图片正被草稿使用');fixture.deletedImages.push(id);fixture.images=fixture.images.filter(image=>image.id!==id);},
     getSettings:async()=>({backendLoggedIn:false}),

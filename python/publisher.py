@@ -57,7 +57,14 @@ class Publisher:
         platform, channel = request.get('platform'), request.get('channel', 'chrome')
         if platform not in URLS or channel not in CHANNELS:
             raise ValueError('不支持的平台或浏览器')
-        return Path(request['profilesRoot']).resolve() / channel / platform
+        base = Path(request['profilesRoot']).resolve() / channel / platform
+        account = request.get('accountId')
+        # Preserve the original profile and encrypted session for default accounts.
+        if account is None or account == f'default-{platform}':
+            return base
+        if not isinstance(account, str) or not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', account):
+            raise ValueError('账号不存在或与平台不匹配')
+        return base / 'accounts' / account
 
     async def finish_closed_window(self, request):
         window = self.logins.get(str(self.profile(request)))
@@ -139,7 +146,7 @@ class Publisher:
                 await context.close()
         self.login_requests.pop(key, None)
         self.log('login.saved', '窗口已关闭，配置已保存；实际登录有效性将在发布时检查', request)
-        return {'state': 'opened'}
+        return {'state': 'opened', 'sessionSaved': True}
 
     async def open_instagram_composer(self, page, job, phase):
         """Native actionable click + bounded effect checks; never retries publication."""

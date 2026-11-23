@@ -1,3 +1,6 @@
+import Accounts, { accountLabel } from "./Accounts";
+import type { PlatformAccount } from "../../shared/types";
+import { defaultAccountId } from "../../shared/accounts";
 import { t, useLanguage } from "./i18n";
 import LanguageSelect from "./LanguageSelect";
 import { formatDate } from "./i18n";
@@ -39,6 +42,10 @@ function App() {
   const STATUS_LABEL: Record<string, string> = {draft:t("草稿"),ready:t("待发布"),scheduled:t("已设提醒"),local_scheduled:t("本地待发布"),prepared:t("素材已准备"),published:t("已发布"),reminder_due:t("提醒已到期"),platform_scheduled:t("平台已排程"),running:t("正在发布"),needs_attention:t("需要处理"),uncertain:t("已提交，结果待确认"),succeeded:t("发布成功")};
   const [logDraftId, setLogDraftId] = useState("");
   const [page, setPage] = useState<Page>("library");
+  const [accounts, setAccounts] = useState<PlatformAccount[]>([]);
+  const [targetAccounts, setTargetAccounts] = useState<string[]>(["instagram","x","pinterest","tiktok","bluesky","facebook"].map(p=>`default-${p}`));
+  const [draftAccount, setDraftAccount] = useState("");
+  const accountName = (draft: Draft) => accountLabel(accounts.find(a=>a.id===(draft.accountId || defaultAccountId(draft.platform))));
   const [images, setImages] = useState<ImageAsset[]>([]);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
@@ -79,7 +86,7 @@ function App() {
     setNotice("");
     try {
     if (selectedDraft && ids.includes(selectedDraft.id)) {
-      await window.reach.updateDraft(selectedDraft.id, { caption, captionHtml, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, publishAt: xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
+      await window.reach.updateDraft(selectedDraft.id, { accountId: draftAccount, caption, captionHtml, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, publishAt: xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
     }
     const result = await window.reach.publishDrafts(ids);
     setNotice(t("已发布 {0}/{1} 条；本地待发布 {2} 条；平台已排程 {3} 条。重试前请核对各任务结果。", [result.filter((d) => d.status === "published").length, result.length, result.filter(d => d.status === "local_scheduled").length, result.filter((d) => d.browserPublish?.state === "scheduled").length]));
@@ -127,13 +134,17 @@ function App() {
     if (folderFilter && (folderFilter === "ungrouped" ? !ungroupedCount : !folders.some(([folder]) => folder === folderFilter))) setFolderFilter("");
   }, [folders, ungroupedCount, folderFilter]);
 
+  useEffect(()=>{setDraftAccount(selectedDraft?.accountId || (selectedDraft ? defaultAccountId(selectedDraft.platform) : ""));},[selectedDraft?.id, selectedDraft?.accountId]);
+
   async function refresh() {
-    const [nextImages, nextDrafts, nextSettings, nextBrowserSettings] = await Promise.all([
+    const [nextImages, nextDrafts, nextSettings, nextBrowserSettings, nextAccounts] = await Promise.all([
       window.reach.listImages(),
       window.reach.listDrafts(),
       window.reach.getSettings(),
-      window.reach.getBrowserSettings()
+      window.reach.getBrowserSettings(),
+      window.reach.listAccounts()
     ]);
+    setAccounts(nextAccounts);
     setImages(nextImages);
     setDrafts(nextDrafts);
     setSettings(nextSettings);
@@ -209,7 +220,7 @@ function App() {
       await task();
       await refresh();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : t("操作失败，请查看运行日志"));
+      setNotice(error instanceof Error ? t(error.message.replace(/^Error invoking remote method [^:]+: (?:Error: )?/, "")) : t("操作失败，请查看运行日志"));
     } finally {
       await window.reach.getSettings().then(setSettings).catch(() => {});
       setBusy(false);
@@ -228,7 +239,7 @@ function App() {
   });
 
   const createDrafts = () => runBusy(t("正在创建平台草稿…"), async () => {
-    const created = await window.reach.createDrafts(selectedImages, platforms, copyOptions);
+    const created = await window.reach.createDrafts(selectedImages, platforms, copyOptions, targetAccounts.filter(id=>accounts.some(a=>a.id===id&&platforms.includes(a.platform))));
     setSelectedDraftId(created[0]?.id || null);
     setPage("queue");
     setNotice(t("已创建 {0} 条发布草稿。", [created.length]));
@@ -259,7 +270,7 @@ function App() {
   const saveDraft = async () => {
     if (!selectedDraft) return;
     await runBusy(t("正在保存草稿…"), async () => {
-      await window.reach.updateDraft(selectedDraft.id, { caption, captionHtml, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, publishAt: xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
+      await window.reach.updateDraft(selectedDraft.id, { accountId: draftAccount, caption, captionHtml, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, publishAt: xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
     });
   };
 
@@ -302,7 +313,7 @@ function App() {
   const prepare = () => {
     if (!selectedDraft) return;
     void runBusy(t("正在准备发布素材…"), async () => {
-      await window.reach.updateDraft(selectedDraft.id, { caption, captionHtml, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, publishAt: xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
+      await window.reach.updateDraft(selectedDraft.id, { accountId: draftAccount, caption, captionHtml, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, publishAt: xScheduleAt ? new Date(xScheduleAt).toISOString() : null });
       await window.reach.prepareDraft(selectedDraft.id);
       setNotice(t("已打开素材文件夹并复制文案，请在平台官网完成发布。"));
     });
@@ -354,7 +365,7 @@ function App() {
   const switchCaptionMode = (mode: "shared" | "independent") => {
     if (!selectedDraft) return;
     void runBusy(t("正在切换文案模式…"), async () => {
-      await window.reach.updateDraft(selectedDraft.id, {caption, captionHtml, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, publishAt: xScheduleAt ? new Date(xScheduleAt).toISOString() : null});
+      await window.reach.updateDraft(selectedDraft.id, {accountId: draftAccount, caption, captionHtml, title, altText, hashtags: hashtags.split(/\s+/).filter(Boolean), boardName, tiktokPrivacy: selectedDraft.platform === "tiktok" ? tiktokPrivacy : undefined, publishAt: xScheduleAt ? new Date(xScheduleAt).toISOString() : null});
       await window.reach.updateDraft(selectedDraft.id, {captionMode: mode});
     });
   };
@@ -388,7 +399,9 @@ function App() {
           <div className="platform-shortcut-grid">
             {Object.entries(PLATFORM_META).map(([platform, meta]) => {
               const Icon = meta.icon;
-              return <button key={platform} className="platform-shortcut-open" disabled={browserBusy} title={t("打开 {0} 网站", [meta.label])} onClick={() => void runBusy(t("正在打开 {0} 专用浏览器…", [meta.label]), () => window.reach.openPlatformBrowser(platform as Platform, true))}><Icon size={15} style={{ color: meta.color }}/><span>{meta.label}</span><ArrowUpRight size={12}/></button>;
+              const account = accounts.find(a=>a.platform===platform);
+              if (!account) return null;
+              return <button key={platform} className="platform-shortcut-open" disabled={browserBusy} title={t("打开 {0} 网站", [meta.label])} onClick={() => void runBusy(t("正在打开 {0} 专用浏览器…", [meta.label]), () => window.reach.openPlatformBrowser(platform as Platform, true, account.id))}><Icon size={15} style={{ color: meta.color }}/><span>{meta.label} · {accountLabel(account)}</span><ArrowUpRight size={12}/></button>;
             })}
           </div>
         </nav>
@@ -423,9 +436,9 @@ function App() {
             finally { setCancellingPublish(false); }
           }}>{cancellingPublish ? t("正在停止…") : t("停止本次发布")}</button></div>}
 
-          {page === "studio" && <ContentStudio images={images} drafts={drafts} refresh={async()=>{setImages(await window.reach.listImages());setDrafts(await window.reach.listDrafts());}}/>}
+          {page === "studio" && <ContentStudio accounts={accounts} images={images} drafts={drafts} refresh={async()=>{setImages(await window.reach.listImages());setDrafts(await window.reach.listDrafts());}}/>}
           {page === "logs" && <RunLogs draftId={logDraftId}/> }
-          {page === "schedules" && <LocalSchedules tasks={localSchedules} images={images} platforms={PLATFORM_META} busy={busy} isLocked={draftLocked}
+          {page === "schedules" && <LocalSchedules accounts={accounts} tasks={localSchedules} images={images} platforms={PLATFORM_META} busy={busy} isLocked={draftLocked}
             onDelete={ids => runBusy(t("正在删除本地定时任务…"), async () => {
               const count = await window.reach.deleteLocalScheduledDrafts(ids);
               setDrafts(old => old.filter(draft => !ids.includes(draft.id)));
@@ -440,7 +453,7 @@ function App() {
             })}
             onLogs={id => { setLogDraftId(id); setPage("logs"); }}/>
           }
-          {page === "history" && <PublishHistory records={publishRecords} images={images} platforms={PLATFORM_META} busy={busy} isLocked={draftLocked} onDelete={deletePublishRecords} onLogs={id => { setLogDraftId(id); setPage("logs"); }}/>}
+          {page === "history" && <PublishHistory accounts={accounts} records={publishRecords} images={images} platforms={PLATFORM_META} busy={busy} isLocked={draftLocked} onDelete={deletePublishRecords} onLogs={id => { setLogDraftId(id); setPage("logs"); }}/>}
           {page === "library" && (
             <>
               <section className="page-heading">
@@ -532,7 +545,8 @@ function App() {
                 </div>
                 <div className="create-footer">
                   <span>{t("已选择 {0} 项素材 · {1} 个平台", [selectedImages.length, platforms.length])}</span>
-                  <button className="button primary" onClick={createDrafts} disabled={busy || !selectedImages.length || !platforms.length || selectedVideoIssues.length > 0}><Plus size={16}/> {t("创建草稿")}</button>
+                  <div className="account-targets"><strong>{t("发布账号")}</strong>{accounts.filter(a=>platforms.includes(a.platform)).map(a=><label key={a.id}><input type="checkbox" disabled={busy} checked={targetAccounts.includes(a.id)} onChange={e=>setTargetAccounts(old=>e.target.checked?[...old,a.id]:old.filter(id=>id!==a.id))}/>{PLATFORM_META[a.platform].label} · {accountLabel(a)}</label>)}</div>
+                  <button className="button primary" onClick={createDrafts} disabled={busy || !selectedImages.length || !platforms.length || selectedVideoIssues.length > 0 || platforms.some(p=>!accounts.some(a=>a.platform===p&&targetAccounts.includes(a.id)))}><Plus size={16}/> {t("创建草稿")}</button>
                 </div>
               </section>
             </>
@@ -575,7 +589,7 @@ function App() {
                       const Icon = meta.icon;
                       return <div key={draft.id} className="draft-select-row"><input type="checkbox" aria-label={t("选择 {0} 草稿 {1}", [meta.label, draft.id])} checked={checkedDrafts.includes(draft.id)} disabled={busy || draftLocked(draft) || !canDeleteDraft(draft)} onChange={(e) => setCheckedDrafts((old) => e.target.checked ? [...old, draft.id] : old.filter((id) => id !== draft.id))}/><button className={`draft-row ${selectedDraftId === draft.id ? "selected" : ""}`} onClick={() => setSelectedDraftId(draft.id)}>
                         <div className="platform-icon" style={{ color: meta.color }}><Icon size={18}/></div>
-                        <div className="draft-row-main"><strong>{meta.label}</strong><span>{t("{0} 项素材 · {1}", [draft.imageIds.length, STATUS_LABEL[draft.browserPublish?.state || draft.status] || draft.status])}</span></div>
+                        <div className="draft-row-main"><strong>{meta.label} · {accountName(draft)}</strong><span>{t("{0} 项素材 · {1}", [draft.imageIds.length, STATUS_LABEL[draft.browserPublish?.state || draft.status] || draft.status])}</span></div>
                         <span className={`status-dot ${draft.status}`}/>
                       </button></div>;
                     })}
@@ -588,7 +602,8 @@ function App() {
                         <div><div className="eyebrow">{t("平台草稿")}</div><h2>{PLATFORM_META[selectedDraft.platform].label}</h2><p>{t("{0} 项素材 · {1}", [selectedDraft.imageIds.length, STATUS_LABEL[selectedDraft.status]])}</p></div>
                         <button className="icon-button danger" disabled={detailBusy || !canDeleteDraft(selectedDraft)} title={t("删除草稿")} onClick={() => void runBusy(t("正在删除草稿…"), async () => { await window.reach.deleteDraft(selectedDraft.id); setCheckedDrafts((old) => old.filter((id) => id !== selectedDraft.id)); setSelectedDraftId(null); })}><Trash2 size={17}/></button>
                       </div>
-                      {selectedDraft.browserPublish && <div className="published-box"><strong>{STATUS_LABEL[selectedDraft.browserPublish.state]}</strong><button className="text-button" onClick={() => { setLogDraftId(selectedDraft.id); setPage("logs"); }}>{t("查看该任务日志")}</button><p className="muted">{selectedDraft.browserPublish.message}</p>
+                      <div className="field"><label htmlFor="draft-account">{t("发布账号")}</label><select id="draft-account" value={draftAccount} disabled={detailBusy || !canEditCopy(selectedDraft) || selectedDraft.status === "local_scheduled"} onChange={e=>setDraftAccount(e.target.value)}>{accounts.filter(a=>a.platform===selectedDraft.platform).map(a=><option key={a.id} value={a.id}>{accountLabel(a)}</option>)}</select><p className="muted">{t("更换账号后请保存修改。本地定时任务需先取消定时。")}</p></div>
+                      {selectedDraft.browserPublish && <div className="published-box"><strong>{STATUS_LABEL[selectedDraft.browserPublish.state]}</strong><button className="text-button" onClick={() => { setLogDraftId(selectedDraft.id); setPage("logs"); }}>{t("查看该任务日志")}</button><p className="muted">{t(selectedDraft.browserPublish.message)}</p>
                         {selectedDraft.browserPublish.state === "uncertain" && <div className="detail-actions">
                           <button className="button success" disabled={detailBusy} onClick={() => void runBusy(t("正在保存核对结果…"), () => window.reach.resolvePublish(selectedDraft.id, true))}>{selectedDraft.scheduleMode === "native" ? t("已在平台确认排程存在") : t("已确认发布成功")}</button>
                           <button className="button secondary" disabled={detailBusy} onClick={() => void runBusy(t("正在保存核对结果…"), () => window.reach.resolvePublish(selectedDraft.id, false))}>{selectedDraft.scheduleMode === "native" ? t("已确认平台中无此排程，允许重试") : t("已确认未发布，允许重试")}</button>
@@ -670,14 +685,10 @@ function App() {
               <section className="page-heading"><div><div className="eyebrow">{t("偏好设置")}</div><h1>{t("设置与账号")}</h1><p>{t("配置浏览器登录和 AI 文案生成功能。")}</p></div></section>
               <section className="panel settings-panel">
                 <h2>{t("Python + Playwright 浏览器发布")}</h2>
-                <p className="muted">{t("三个平台均使用普通 Google Chrome 的独立窗口登录。完成后点击“完成登录 / 关闭窗口”，程序关闭窗口并加密保存登录状态，再由 Playwright 复用同一配置发布，默认无头运行。")}</p>
+                <p className="muted">{t("每个账号使用独立登录环境。默认账号沿用原有登录状态和草稿。")}</p>
                 <div className="field"><label>{t("登录与发布浏览器")}</label><p>{t("Google Chrome（需已安装）")}</p></div>
                 <label><input type="checkbox" disabled={browserBusy} checked={browserSettings.showBrowser} onChange={e=>void runBusy(t("正在保存浏览器设置…"),async()=>{setBrowserSettings(await window.reach.saveBrowserSettings({...browserSettings,showBrowser:e.target.checked}));})}/> {t("显示浏览器（发布时打开可见窗口）")}</label>
                 <p className="muted">{t("登录始终使用可见的普通 Chrome；上方开关仅控制发布窗口。各平台配置独立，不影响日常 Chrome。旧 Edge / Chromium 配置保留，但需在 Chrome 中重新登录。保存登录不代表平台允许发布。")}</p>
-                {(["instagram","x","pinterest","tiktok","bluesky","facebook"] as Platform[]).map(platform=><div className="settings-actions" key={platform}>
-                  <button className="button secondary" disabled={browserBusy} onClick={()=>void runBusy(t("正在打开登录窗口…"),()=>window.reach.openPlatformBrowser(platform))}>{t("登录 {0}", [PLATFORM_META[platform].label])}</button>
-                  <button className="button secondary" disabled={browserBusy} onClick={()=>void runBusy(t("正在保存登录配置…"),async()=>{await window.reach.closePlatformBrowser(platform);setNotice(t("窗口已关闭，浏览器配置已保存。发布时将检查登录是否有效。"));})}>{t("完成 {0} 登录 / 关闭窗口", [PLATFORM_META[platform].label])}</button>
-                </div>)}
                 <p className="muted">{t("失败截图保存在日志目录的 screenshots 子目录，最多保留 50 张；可能包含账号和草稿内容。可在运行日志中查看路径并打开日志文件夹。")}</p>
               </section>
               <section className="panel settings-panel">
@@ -685,6 +696,7 @@ function App() {
                 <p className="muted">{t("登录账户后即可使用图片理解，无需填写 API 密钥。")}</p>
                 <div className="key-status"><span className={`status-dot ${settings.backendLoggedIn ? "published" : "draft"}`}/>{settings.backendLoggedIn ? t("已登录，可生成 AI 文案") : t("请先登录下方账户，也可以手动创建和编辑文案。")}</div>
               </section>
+              <Accounts accounts={accounts} busy={browserBusy} run={runBusy} platforms={PLATFORM_META}/>
               <ImageGenerationSettings busy={busy} settings={settings} setSettings={setSettings} runBusy={runBusy}/>
               <PlatformSettings/>
               <section className="panel"><h2>{t("隐私说明")}</h2><p className="muted">{t("图片、草稿和导出文件均保存在本地。生成 AI 文案时，会将压缩后的所选图片发送至服务器，由服务器调用 DeepSeek；发布时将内容上传至所选平台。各平台使用本机独立保存的浏览器配置。")}</p></section>

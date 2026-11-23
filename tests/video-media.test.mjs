@@ -33,6 +33,7 @@ try {
   const source = path.join(root,'video.mp4');
   await promisify(execFile)(ffmpeg,['-hide_banner','-loglevel','error','-f','lavfi','-i','color=c=blue:s=720x1280:r=30','-t','4','-c:v','libx264','-pix_fmt','yuv420p',source],{windowsHide:true});
   const service = load('src/main/image-service.ts');
+  load('src/shared/accounts.ts').migrateAccounts(data);
   const drafts = load('src/main/draft-service.ts');
   const rules = load('src/shared/video-rules.ts');
   const result = await service.importFiles([source],root);

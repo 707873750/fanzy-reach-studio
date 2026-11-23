@@ -1,3 +1,4 @@
+import { getAccount } from "./accounts";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -10,15 +11,6 @@ import { readPlatformDefaults } from "../shared/platform-defaults";
 import { canDeleteDraft, canDeletePublishRecord, isLocalScheduledDraft } from "../shared/draft-lifecycle";
 import { assertVideoCompatible, assertVideoCaption, groupMedia, isVideo } from "../shared/video-rules";
 
-const PLATFORM_URLS: Record<Platform, string> = {
-  facebook: "https://www.facebook.com/",
-  bluesky: "https://bsky.app/intent/compose",
-  instagram: "https://www.instagram.com/",
-  x: "https://x.com/compose/post",
-  pinterest: "https://www.pinterest.com/",
-  tiktok: "https://www.tiktok.com/tiktokstudio/upload"
-};
-
 const PLATFORM_SIZES: Record<Platform, { width: number; height: number }> = {
   facebook: { width: 2048, height: 2048 },
   bluesky: { width: 1600, height: 1600 },
@@ -28,7 +20,7 @@ const PLATFORM_SIZES: Record<Platform, { width: number; height: number }> = {
   tiktok: { width: 1080, height: 1920 }
 };
 
-export async function createDrafts(imageIds: string[], platforms: Platform[], copy?: CopyOptions) {
+export async function createDrafts(imageIds: string[], platforms: Platform[], copy?: CopyOptions, accountIds?: string[]) {
   if (!imageIds.length) throw new Error("请至少选择一张图片");
   if (!platforms.length) throw new Error("请至少选择一个平台");
   if (imageIds.length > 500) throw new Error("每批最多选择 500 张图片");
@@ -40,6 +32,13 @@ export async function createDrafts(imageIds: string[], platforms: Platform[], co
   // Validate the whole batch before adding any draft to the persistent store.
   for (const platform of new Set(platforms)) for (const asset of assets) assertVideoCompatible(asset, platform);
 
+  if (accountIds !== undefined && (!Array.isArray(accountIds) || !accountIds.length || accountIds.length > 120 || accountIds.some(id => typeof id !== "string"))) throw new Error("请选择发布账号");
+  const targets = accountIds === undefined ? [...new Set(platforms)].map(platform => getAccount(platform)) : [...new Set(accountIds)].map(id => {
+    const account = store.accounts?.find(a => a.id === id);
+    if (!account || account.deletedAt || !platforms.includes(account.platform)) throw new Error("账号不存在或与平台不匹配");
+    return account;
+  });
+  if (platforms.some(p => !targets.some(a => a.platform === p))) throw new Error("请选择发布账号");
   const created: Draft[] = [];
   const defaults = readPlatformDefaults(store.settings.platformDefaults);
   const createdTime = Date.now();
@@ -52,7 +51,8 @@ export async function createDrafts(imageIds: string[], platforms: Platform[], co
     if (option?.captionHtml !== undefined && (typeof option.captionHtml !== "string" || option.captionHtml.length > 100000)) throw new Error("无效的富文本文案");
     if (option && (!["shared", "independent"].includes(option.mode) || typeof option.caption !== "string")) throw new Error("无效的平台文案配置");
   }
-  for (const platform of new Set(platforms)) {
+  for (const account of targets) {
+    const platform = account.platform;
     const config = defaults[platform];
     const size = config.imagesPerDraft;
     for (const group of groupMedia(assets, size)) {
@@ -60,6 +60,7 @@ export async function createDrafts(imageIds: string[], platforms: Platform[], co
       const draft: Draft = {
         id: crypto.randomUUID(),
         platform,
+        accountId: account.id,
         imageIds: group,
         mediaType: isVideo(assets.find(asset => asset.id === group[0])!) ? "video" : "image",
         title: config.title,
@@ -103,6 +104,11 @@ export async function updateDraft(draftId: string, patch: DraftPatch) {
   if (!existing) throw new Error("未找到草稿");
   if (!canEditCopy(existing)) throw new Error("请先核对发布结果；已发布或已排程的草稿不能修改");
   if (existing.browserPublish?.state === "scheduled") throw new Error("该任务已提交到 X，请在 X 的已排程帖子中修改或取消");
+  if (patch.accountId !== undefined && patch.accountId !== existing.accountId) {
+    if (existing.status === "local_scheduled") throw new Error("请先取消本地定时，再更换账号");
+    allowed.accountId = getAccount(existing.platform, patch.accountId).id;
+    if (allowed.accountId !== existing.accountId) { allowed.browserPublish = undefined; allowed.preparedFolder = null; }
+  }
   if (patch.xScheduledAt !== undefined) {
     if (["running", "uncertain", "succeeded"].includes(existing.browserPublish?.state || "") && patch.xScheduledAt !== existing.xScheduledAt) throw new Error("请先核对已有发布结果，再修改排程");
     if (patch.xScheduledAt === null) allowed.xScheduledAt = null;
@@ -246,15 +252,9 @@ export async function prepareDraft(draftId: string, interactive = true) {
   clipboard.writeText(captionText);
   await shell.openPath(outputFolder);
 
-  // X Share Intent can prefill text, but it cannot attach local files.
-  // The user must drag the prepared images into the composer and click Post.
-  if (draft.platform === "x") {
-    const intent = new URL("https://twitter.com/intent/tweet");
-    intent.searchParams.set("text", captionText);
-    await shell.openExternal(intent.toString());
-  } else {
-    await shell.openExternal(PLATFORM_URLS[draft.platform]);
-  }
+  // Manual publishing must open the same account environment as automated publishing.
+  const { openPlatformBrowser } = await import("./browser-publisher");
+  await openPlatformBrowser(draft.platform, true, draft.accountId);
   }
 
   const updated = updateDraftRecord(draftId, {

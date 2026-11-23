@@ -1,3 +1,4 @@
+import { getAccount } from "./accounts";
 import { BrowserWindow } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -12,7 +13,7 @@ import { log, errorDetail } from "./run-logger";
 import { setPerformancePublishing } from "./performance-monitor";
 import { publisherCommand, macSessionKey } from "./publisher-runtime";
 
-type Result = { state: "opened" | "succeeded" | "needs_attention" | "uncertain" | "local_scheduled"; message?: string; url?: string };
+type Result = { sessionSaved?: boolean; state: "opened" | "succeeded" | "needs_attention" | "uncertain" | "local_scheduled"; message?: string; url?: string };
 let busy = false;
 const locked = new Set<string>();
 let activeBatch: { cancelled: boolean; platforms: Set<Platform>; done: Promise<void>; finish: () => void; shutdown?: Promise<unknown> } | undefined;
@@ -152,24 +153,28 @@ function request(payload: {platform: Platform; [key: string]: unknown}, checkpoi
   return client.request(payload, checkpoint);
 }
 
-export async function openPlatformBrowser(platform: Platform, viewOnly = false) {
+export async function openPlatformBrowser(platform: Platform, viewOnly = false, accountId?: string) {
   if (!["instagram", "x", "pinterest", "tiktok", "bluesky", "facebook"].includes(platform)) throw new Error("无效的平台");
   if (busy) throw new Error("请等待当前浏览器操作完成");
   busy = true;
   try {
     void log({ source: "app", level: "info", step: "account.inspect", message: "请求打开平台账号页面", platform });
-    const result = await request({ action: "login", platform, viewOnly, ...browserOptions() });
+    const result = await request({ action: "login", platform, accountId: getAccount(platform, accountId).id, viewOnly, ...browserOptions() });
     if (result.state !== "opened") throw new Error(result.message || "无法打开浏览器");
   } finally { busy = false; }
 }
 
-export async function closePlatformBrowser(platform: Platform) {
+export async function closePlatformBrowser(platform: Platform, accountId?: string) {
   if (!["instagram", "x", "pinterest", "tiktok", "bluesky", "facebook"].includes(platform)) throw new Error("无效的平台");
   if (busy) throw new Error("请等待当前浏览器操作完成");
   busy = true;
   try {
-    const result = await request({ action: "close_login", platform, ...browserOptions() });
+    const result = await request({ action: "close_login", platform, accountId: getAccount(platform, accountId).id, ...browserOptions() });
     if (result.state !== "opened") throw new Error(result.message || "无法关闭登录窗口");
+    if (result.sessionSaved) {
+      getAccount(platform, accountId).sessionSavedAt = new Date().toISOString();
+      await persistStore();
+    }
   } finally { busy = false; }
 }
 
@@ -184,6 +189,7 @@ export async function publishDrafts(ids: string[], localDue = false) {
     if (localDue && (draft.status !== "local_scheduled" || !Number.isFinite(time) || time > Date.now())) throw new Error("本地任务尚未到期");
     if (!localDue && draft.status === "local_scheduled") throw new Error("任务已进入本地队列，请取消后重新提交");
     if (!localDue && (draft.publishAt || draft.xScheduledAt) && (!Number.isFinite(time) || time < Date.now()+300000)) throw new Error("定时发布时间必须至少在 5 分钟以后");
+    getAccount(draft.platform, draft.accountId);
     return draft;
   });
   busy = true;
@@ -194,7 +200,7 @@ export async function publishDrafts(ids: string[], localDue = false) {
   notifyBatch();
   setPerformancePublishing(true);
   void log({ source: "app", level: "info", step: "batch.start", message: `开始跨平台并行发布，共 ${drafts.length} 条草稿；同平台依次执行` });
-  const blocked = new Set<Platform>();
+  const blocked = new Set<string>();
   const groups = new Map<Platform, Draft[]>();
   for (const draft of drafts) groups.set(draft.platform, [...(groups.get(draft.platform) || []), draft]);
   try {
@@ -204,8 +210,8 @@ export async function publishDrafts(ids: string[], localDue = false) {
           await record(draft.id, "needs_attention", "本次发布已停止，此任务尚未提交，可重新选择发布。");
           continue;
         }
-        if (blocked.has(draft.platform)) {
-          await record(draft.id, "needs_attention", "此平台的上一条任务需要处理，当前任务尚未提交。");
+        if (blocked.has(getAccount(draft.platform, draft.accountId).id)) {
+          await record(draft.id, "needs_attention", "此账号的上一条任务需要处理，当前任务尚未提交。");
           continue;
         }
         let submittedAt: string | undefined;
@@ -239,12 +245,12 @@ export async function publishDrafts(ids: string[], localDue = false) {
             await record(draft.id, nativeScheduledAt ? "scheduled" : "succeeded", result.message || "发布成功", submittedAt);
           } else {
             await record(draft.id, submittedAt ? "uncertain" : "needs_attention", result.message || "请检查浏览器页面", submittedAt);
-            blocked.add(draft.platform);
+            blocked.add(getAccount(draft.platform, draft.accountId).id);
           }
         } catch (error) {
           void log({ source: "app", level: submittedAt ? "warn" : "error", step: submittedAt ? "task.uncertain" : "task.failed", message: submittedAt ? "已提交，结果待确认" : "发布任务失败", detail: errorDetail(error), draftId: draft.id, platform: draft.platform });
           await record(draft.id, submittedAt ? "uncertain" : "needs_attention", batch.cancelled ? submittedAt ? "发布已中断，提交结果待确认，请到平台核对后再操作。" : "本次发布已停止，此任务尚未提交，可重新选择发布。" : submittedAt ? "已提交，结果待确认" : error instanceof Error ? error.message : "浏览器操作失败", submittedAt);
-          blocked.add(draft.platform);
+          blocked.add(getAccount(draft.platform, draft.accountId).id);
         }
       }
     }));

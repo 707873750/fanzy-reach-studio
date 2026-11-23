@@ -2289,5 +2289,146 @@
   "月视图": ["Month", "月", "월"]
 ,
   "上一页": ["Previous", "前へ", "이전"],
-  "下一页": ["Next", "次へ", "다음"]
+  "下一页": ["Next", "次へ", "다음"],
+  "默认账号": [
+    "Default account",
+    "デフォルトアカウント",
+    "기본 계정"
+  ],
+  "平台账号": [
+    "Platform accounts",
+    "プラットフォームアカウント",
+    "플랫폼 계정"
+  ],
+  "账号名称": [
+    "Account name",
+    "アカウント名",
+    "계정 이름"
+  ],
+  "添加账号": [
+    "Add account",
+    "アカウントを追加",
+    "계정 추가"
+  ],
+  "正在保存账号…": [
+    "Saving account…",
+    "アカウントを保存中…",
+    "계정 저장 중…"
+  ],
+  "重命名账号": [
+    "Rename account",
+    "アカウント名を変更",
+    "계정 이름 변경"
+  ],
+  "查看账号": [
+    "View account",
+    "アカウントを確認",
+    "계정 보기"
+  ],
+  "完成登录 / 关闭窗口": [
+    "Finish login / Close window",
+    "ログイン完了 / ウィンドウを閉じる",
+    "로그인 완료 / 창 닫기"
+  ],
+  "发布账号": [
+    "Publishing accounts",
+    "投稿先アカウント",
+    "게시 계정"
+  ],
+  "沿用原有登录环境": [
+    "Existing login environment preserved",
+    "既存のログイン環境を引き継ぎ",
+    "기존 로그인 환경 유지"
+  ],
+  "尚未保存登录配置": [
+    "Login configuration not saved yet",
+    "ログイン設定は未保存です",
+    "로그인 설정이 아직 저장되지 않았습니다"
+  ],
+  "发布时检查登录有效性": [
+    "Login validity is checked when publishing",
+    "投稿時にログインの有効性を確認します",
+    "게시 시 로그인 유효성을 확인합니다"
+  ],
+  "登录配置已保存于 {0}": [
+    "Login configuration saved on {0}",
+    "ログイン設定の保存日時：{0}",
+    "로그인 설정 저장: {0}"
+  ],
+  "每个账号使用独立登录环境。默认账号沿用原有登录状态和草稿。": [
+    "Each account has its own login environment. Default accounts retain existing sessions and drafts.",
+    "各アカウントは独立したログイン環境を使用します。デフォルトアカウントは既存のログイン状態と下書きを引き継ぎます。",
+    "계정마다 독립된 로그인 환경을 사용합니다. 기본 계정은 기존 로그인 상태와 초안을 유지합니다."
+  ],
+  "账号名称是本地备注。保存登录前，请在浏览器中核对用户名；不要在同一个账号窗口中切换身份。": [
+    "Account names are local labels. Verify the username in the browser before saving login; do not switch identities within an account window.",
+    "アカウント名はローカルの表示名です。ログイン保存前にブラウザーでユーザー名を確認し、同じアカウントのウィンドウ内で別のユーザーに切り替えないでください。",
+    "계정 이름은 로컬 표시명입니다. 로그인 저장 전에 브라우저에서 사용자 이름을 확인하고 같은 계정 창에서 다른 계정으로 전환하지 마세요."
+  ],
+  "更换账号后请保存修改。本地定时任务需先取消定时。": [
+    "Save changes after switching accounts. Cancel local scheduling before changing the account.",
+    "アカウント変更後は保存してください。ローカル予約は先に解除してください。",
+    "계정 변경 후 저장하세요. 로컬 예약 작업은 먼저 예약을 취소하세요."
+  ],
+  "账号不存在或与平台不匹配": [
+    "Account not found or platform mismatch",
+    "アカウントが存在しないか、プラットフォームが一致しません",
+    "계정이 없거나 플랫폼이 일치하지 않습니다"
+  ],
+  "账号名称需为 1 至 80 个字符": [
+    "Account names must contain 1 to 80 characters",
+    "アカウント名は1～80文字で入力してください",
+    "계정 이름은 1~80자여야 합니다"
+  ],
+  "每个平台最多添加 20 个账号": [
+    "Up to 20 accounts per platform",
+    "各プラットフォームに最大20アカウントまで追加できます",
+    "플랫폼당 최대 20개 계정을 추가할 수 있습니다"
+  ],
+  "请选择发布账号": [
+    "Select publishing accounts",
+    "投稿先アカウントを選択してください",
+    "게시 계정을 선택하세요"
+  ],
+  "请先取消本地定时，再更换账号": [
+    "Cancel local scheduling before changing accounts",
+    "アカウント変更前にローカル予約を解除してください",
+    "계정 변경 전에 로컬 예약을 취소하세요"
+  ],
+  "此账号的上一条任务需要处理，当前任务尚未提交。": [
+    "The previous task for this account needs attention; this task was not submitted.",
+    "このアカウントの前のタスクに対応が必要なため、このタスクは未送信です。",
+    "이 계정의 이전 작업을 확인해야 합니다. 현재 작업은 제출되지 않았습니다。"
+  ],
+  "全部账号": ["All accounts", "すべてのアカウント", "모든 계정"],
+  "删除账号": [
+    "Delete account",
+    "アカウントを削除",
+    "계정 삭제"
+  ],
+  "确认删除账号": [
+    "Confirm account deletion",
+    "アカウントの削除を確認",
+    "계정 삭제 확인"
+  ],
+  "正在删除账号…": [
+    "Deleting account…",
+    "アカウントを削除中…",
+    "계정 삭제 중…"
+  ],
+  "确定删除账号“{0}”？账号将从列表移除，本地浏览器文件保留，不会注销平台账号。": [
+    "Delete “{0}”? It will be removed from this list. Local browser files are retained, and the platform account will not be closed.",
+    "「{0}」を削除しますか？一覧から削除されます。ローカルのブラウザーファイルは保持され、プラットフォームのアカウントは削除されません。",
+    "“{0}” 계정을 삭제할까요? 목록에서 제거되며 로컬 브라우저 파일과 플랫폼 계정은 유지됩니다."
+  ],
+  "有关联草稿、定时任务或发布记录的账号暂不能删除。": [
+    "Accounts with linked drafts, scheduled tasks or publishing records cannot be deleted.",
+    "下書き、予約タスク、投稿履歴が関連付けられているアカウントは削除できません。",
+    "연결된 초안, 예약 작업 또는 게시 기록이 있는 계정은 삭제할 수 없습니다."
+  ],
+  "此账号仍有关联草稿、定时任务或发布记录。请先更换草稿账号，或移除关联任务和记录，再删除账号。": [
+    "This account still has linked drafts, scheduled tasks or publishing records. Reassign drafts or remove linked tasks and records before deleting it.",
+    "このアカウントには下書き、予約タスク、投稿履歴が関連付けられています。下書きのアカウントを変更するか、関連するタスクと履歴を削除してから再度お試しください。",
+    "이 계정에는 연결된 초안, 예약 작업 또는 게시 기록이 있습니다. 초안의 계정을 변경하거나 연결된 작업과 기록을 제거한 후 계정을 삭제하세요."
+  ]
 }

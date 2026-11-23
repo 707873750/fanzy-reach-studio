@@ -47,6 +47,7 @@ function spawn() {
       },15);
     } else if(message.action==='publish') {
       job=message;
+      assert.equal(message.accountId,store.findDraft(message.id).accountId,'publish carries the bound account');
       assert.ok(!active.has(job.platform),'same platform must never overlap');
       active.add(job.platform);maximum=Math.max(maximum,active.size);starts.push(job.id);
       if(job.platform===fallbackPlatform && job.nativeScheduledAt) {active.delete(job.platform);emit({type:'result',state:'local_scheduled'});done();return;}
@@ -64,6 +65,7 @@ const dependencies={
   electron:{app:{isPackaged:false,getAppPath:()=>'/fixture'},BrowserWindow:{getAllWindows:()=>[]}},
   'node:child_process':{spawn},'node:readline':{createInterface},
   'node:fs/promises':{readdir:async()=>['01-photo.jpg']},'node:fs':{existsSync:()=>true},'node:path':path,
+  './accounts':{getAccount:(platform,id)=>({id:id||`default-${platform}`,platform})},
   './store':store,'./draft-service':{prepareDraft:async id=>{if(prepareGate) await prepareGate;return {folder:'/fixture/'+id, files:['/fixture/'+id+'/01-photo.jpg'], mediaType:'image'};}},
   './publisher-runtime':{publisherCommand:()=>({command:'fixture-python',args:[]}),macSessionKey:()=>undefined},
   './run-logger':{log:async e=>events.push(e),errorDetail:String},
@@ -95,6 +97,12 @@ assert.ok(!starts.includes('xf2'),'failed platform stops its later tasks');
 assert.equal(store.findDraft('xf1').browserPublish.state,'uncertain');
 assert.equal(store.findDraft('xf2').browserPublish.state,'needs_attention');
 assert.equal(store.findDraft('tf2').status,'published','other platform continues');
+// A failure pauses this account, not another account on the same platform.
+starts=[];
+drafts=[{...make('account-a1','x'),accountId:'a'},{...make('account-a2','x'),accountId:'a'},{...make('account-b','x'),accountId:'b'}];
+await api.publishDrafts(drafts.map(d=>d.id));
+assert.ok(!starts.includes('account-a2'));
+assert.ok(starts.includes('account-b'));
 failPlatform=undefined;crashPlatform='x';starts=[];
 drafts=[make('xc1','x'),make('xc2','x'),make('tc1','tiktok'),make('tc2','tiktok')];
 await api.publishDrafts(drafts.map(d=>d.id));

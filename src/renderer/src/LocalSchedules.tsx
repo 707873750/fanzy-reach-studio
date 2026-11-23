@@ -1,10 +1,14 @@
+import { accountLabel } from "./Accounts";
+import type { PlatformAccount } from "../../shared/types";
+import { defaultAccountId } from "../../shared/accounts";
 import { useEffect, useState } from "react";
 import { CalendarClock, Trash2 } from "lucide-react";
 import type { Draft, ImageAsset, Platform } from "../../shared/types";
 import { canDeleteDraft } from "../../shared/draft-lifecycle";
 import { formatDate, t, useLanguage } from "./i18n";
 
-export default function LocalSchedules({ tasks, images, platforms, busy, isLocked, onDelete, onCancel, onLogs }: {
+export default function LocalSchedules({ accounts = [], tasks, images, platforms, busy, isLocked, onDelete, onCancel, onLogs }: {
+  accounts?: PlatformAccount[];
   tasks: Draft[];
   images: ImageAsset[];
   platforms: Record<Platform, { label: string }>;
@@ -15,6 +19,7 @@ export default function LocalSchedules({ tasks, images, platforms, busy, isLocke
   onLogs: (id: string) => void;
 }) {
   useLanguage();
+  const accountName=(d:Draft)=>accountLabel(accounts.find(a=>a.id===(d.accountId||defaultAccountId(d.platform))));
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
   const deletable = tasks.filter(task => canDeleteDraft(task) && !isLocked(task));
   const selected = deletable.filter(task => checkedIds.includes(task.id));
@@ -49,7 +54,7 @@ export default function LocalSchedules({ tasks, images, platforms, busy, isLocke
           <input type="checkbox" aria-label={t("选择本地定时任务 {0}", [task.id])} checked={checkedIds.includes(task.id)} disabled={disabled} onChange={event => setCheckedIds(old => event.target.checked ? [...old, task.id] : old.filter(id => id !== task.id))}/>
           <div className="local-schedule-thumb">{image?.thumbnailDataUrl ? <img src={image.thumbnailDataUrl} alt={image.fileName}/> : <CalendarClock size={23}/>}</div>
           <div className="local-schedule-main">
-            <strong>{platforms[task.platform].label} · {task.title || t("未填写标题")}</strong>
+            <strong>{platforms[task.platform].label} · {accountName(task)} · {task.title || t("未填写标题")}</strong>
             <p className="local-schedule-caption">{task.caption || t("未填写文案")}</p>
             <p className="local-schedule-time"><CalendarClock size={13}/>{time && Number.isFinite(Date.parse(time)) ? formatDate(time) : t("未设置发布时间")} · {t("{0} 项素材", [task.imageIds.length])}</p>
             {locked && <p className="muted">{t("任务正在执行或已锁定，暂不可删除。")}</p>}

@@ -266,3 +266,6 @@ button { cursor: pointer; }
 .calendar-toolbar select{background:#23232f;color:#ececf2;border-color:#3c3a4d;color-scheme:dark}
 .calendar-agenda-list{scrollbar-width:thin;scrollbar-color:#514566 #191a23}
 .calendar-day{height:108px}
+
+.account-add{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}.account-add input{min-width:160px;flex:1}.account-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}.account-card{border:1px solid var(--border,#343845);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}.account-card strong{overflow-wrap:anywhere}.account-card small{color:var(--text-muted,#a0a6b5)}.account-targets{display:flex;flex-wrap:wrap;gap:12px;width:100%;margin:12px 0}.account-targets strong{width:100%}.account-targets label{display:flex;align-items:center;gap:6px}.account-panel .settings-actions{flex-wrap:wrap}
+.account-add input,.account-add select{background:#11131b;color:#e7e9f1;border:1px solid #343845;border-radius:8px;padding:10px 12px;font:inherit;min-width:0}.account-add input:focus,.account-add select:focus{outline:2px solid #8b7ce8;outline-offset:1px}.account-add input::placeholder{color:#8e95a8}.account-add input:disabled,.account-add select:disabled{opacity:.6}
