@@ -2678,5 +2678,7 @@
   ],
   "关闭": ["Close", "閉じる", "닫기"],
   "图片处理失败，请检查素材文件或稍后重试。": ["Image processing failed. Check the media file or try again later.", "画像を処理できませんでした。素材ファイルを確認するか、後でもう一度お試しください。", "이미지 처리에 실패했습니다. 미디어 파일을 확인하거나 나중에 다시 시도하세요."],
-  "拖动整图或框外重新框选；拖动框内移动，拖动边角缩放。": ["Drag on the full image or outside the crop to draw a new area. Drag inside to move it, or drag its edges and corners to resize.", "画像全体や枠の外をドラッグして範囲を選択。枠内をドラッグして移動し、辺や角をドラッグしてサイズを変更できます。", "전체 이미지나 영역 밖을 드래그해 새 영역을 선택하세요. 안쪽을 드래그하면 이동하고 가장자리와 모서리를 드래그하면 크기를 조절합니다."]
+  "拖动整图或框外重新框选；拖动框内移动，拖动边角缩放。": ["Drag on the full image or outside the crop to draw a new area. Drag inside to move it, or drag its edges and corners to resize.", "画像全体や枠の外をドラッグして範囲を選択。枠内をドラッグして移動し、辺や角をドラッグしてサイズを変更できます。", "전체 이미지나 영역 밖을 드래그해 새 영역을 선택하세요. 안쪽을 드래그하면 이동하고 가장자리와 모서리를 드래그하면 크기를 조절합니다."],
+  "精细调整": ["Fine adjustments", "微調整", "세부 조정"],
+  "原图保持不变": ["Original image unchanged", "元画像は変更されません", "원본 이미지는 변경되지 않습니다"]
 }

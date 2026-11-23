@@ -30,7 +30,10 @@ if(process.type==='renderer') {
  const click=async text=>run(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()===${JSON.stringify(text)}).click()`);
  const change=async(selector,value,isSelect=false)=>run(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(${isSelect?'HTMLSelectElement':'HTMLInputElement'}.prototype,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event(${isSelect?"'change'":"'input'"},{bubbles:true}));})()`);
  try{
-  await win.loadFile(path.resolve('out/renderer/index.html'));await wait(`document.querySelectorAll('.image-card').length===2`);await run(`document.querySelector('.image-card').click()`);await click('编辑所选图片');await wait(`!!document.querySelector('.edit-stage>img')`);
+  await win.loadFile(path.resolve('out/renderer/index.html'));await wait(`document.querySelectorAll('.image-card').length===2`);await run(`document.querySelector('.image-card').click()`);await click('编辑所选图片');await wait(`!!document.querySelector('.edit-stage img')`);
+  assert.ok(await run(`document.querySelector('.edit-stage canvas').getBoundingClientRect().height>400`),'large crop canvas');
+  assert.ok(await run(`document.querySelector('.edit-controls').getBoundingClientRect().width<=250`),'compact inspector');
+  await click('编辑效果');assert.equal(await run(`document.querySelector('.edit-stage canvas').hidden`),true);await click('裁剪区域');
   win.showInactive();
   const dragCrop=async(start,end)=>{
     const r=await run(`(()=>{const r=document.querySelector('.edit-stage canvas').getBoundingClientRect();return {x:r.left,y:r.top,w:r.width,h:r.height};})()`);
@@ -47,7 +50,7 @@ if(process.type==='renderer') {
   await dragCrop([.8,.8],[.9,.9]);values=await cropValues();assert.ok(Math.abs(values[0]-60)<=2&&Math.abs(values[1]-60)<=2,'resize crop corner directly');
   win.hide();
   assert.equal(data.images.length,2);await click('关闭');assert.equal(data.images.length,2);
-  await click('编辑所选图片');await wait(`!!document.querySelector('.edit-stage>img')`);
+  await click('编辑所选图片');await wait(`!!document.querySelector('.edit-stage img')`);
   for(const [lang,heading] of [['en','Image editor'],['ja','画像編集'],['ko','이미지 편집'],['zh-CN','图片编辑']]){await change('.language-select select',lang,true);await wait(`document.querySelector('#image-editor-heading').textContent===${JSON.stringify(heading)}`);}
   await click('顺时针旋转 90°');await wait(`!!document.querySelector('.edit-stage canvas')&&!document.querySelector('.edit-controls').disabled`);
   await change('.edit-controls select','1',true);await change('.edit-controls input[maxlength]','FANZY · 日本語');await wait(`!document.querySelector('.image-editor footer button').disabled`);
